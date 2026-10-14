@@ -1,417 +1,380 @@
-import { useState, useEffect, useRef, useMemo, useCallback, memo } from "react";
-import Head from "next/head";
-import isMobile from "is-mobile";
-import NavBar from "../components/NavBar";
-import {
-  KuraNode,
-  MojNode,
-  CCStudiosNode,
-  BonzoNode2,
-  DojoNode,
-} from "../components/MapNodes";
-import {
-  generateMapElements,
-  getElementSize,
-  getEntitySizing,
-} from "../data/jungleMapElements";
+// WAKING — Physical Plane (REAL WORLD map)
+//
+// Ported verbatim from CONSOLIDATED/client/pages/index.js. This is the *real world*
+// map: physical-plane events plotted by lat/lng with an always-visible bottom drawer
+// that cycles through 3 states (collapsed tabs → expanded → fully expanded).
+//
+// The DREAM world map (procedural jungle grid, entity nodes, connections DRAWER) is a
+// different product and lives on its own route at /profile — see pages/profile/index.js.
+// Do not conflate the two: this page must never render jungle entities.
+//
+// Token note: CONSOLIDATED's tailwind maps primary=#151413 (charcoal) and
+// secondary=#ABD49E (sage) — the exact inverse of rebuilt's config. Every colour class
+// below was swapped (primary<->secondary) when porting so the rendered result is
+// identical to CONSOLIDATED. `text-accent`/`bg-accent` (CONSOLIDATED accent = #8B5CF6)
+// were inlined as arbitrary values because rebuilt's `accent` is an object, not a colour.
+import { useState, useEffect, useRef } from 'react';
+import Head from 'next/head';
+import Link from 'next/link';
+import { MapPin, Calendar, Clock, Search, X, Filter, ChevronUp, ChevronDown, Sparkles, Compass, ArrowRight, Navigation, Plus } from 'lucide-react';
 
-// Grid constants
-const GRID_SIZE = 75;
-
-// Entity placements on the grid — buildings are large "building" type
-const MAP_ENTITIES = [
-  { id: "kura",       type: "user",     gridX: 0,   gridY: 0,   name: "YOUR KURA" },
-  { id: "bonzo",      type: "user",     gridX: -3,  gridY: 7,   name: "BONZO" },
-  { id: "moj",        type: "building", gridX: -12, gridY: -5,  name: "OLD SECRETARIAT" },
-  { id: "ccstudios",  type: "building", gridX: 8,   gridY: 3,   name: "CAPPUCCINO STUDIOX" },
-  { id: "dojo",       type: "building", gridX: 14,  gridY: -8,  name: "BONZO'S DOJO" },
+const MOCK_EVENTS = [
+  { _id: '1', title: 'ENTERTAINMENT WEEK AFRICA 2025', location: 'LANDMARK CENTER, VI LAGOS', lat: 6.4435, lng: 3.4315, date: 'NOV 22', time: '10:00AM', price: 'FREE', tags: ['PARTY', 'CONFERENCE', 'TRADE FAIR'], category: 'conference' },
+  { _id: '2', title: 'LUCID JUNGLES LAUNCH PARTY', location: 'ART TECH HUB, IKEJA', lat: 6.6018, lng: 3.3515, date: 'DEC 15', time: '8:00PM', price: '₦5,000', tags: ['MUSIC', 'NETWORKING', 'ART'], category: 'music' },
+  { _id: '3', title: 'CAPPUCCINO STUDIOS SHOWCASE', location: 'VIRTUAL REALM', lat: 6.5, lng: 3.4, date: 'JAN 10', time: '6:00PM', price: 'FREE', tags: ['ART', 'PORTFOLIO', 'DIGITAL'], category: 'art' },
+  { _id: '4', title: 'FITNESS FESTIVAL LAGOS', location: 'EKO ATLANTIC, LAGOS', lat: 6.4275, lng: 3.4175, date: 'FEB 5', time: '7:00AM', price: '₦3,000', tags: ['FITNESS', 'WELLNESS', 'OUTDOOR'], category: 'fitness' },
+  { _id: '5', title: 'DREAM WORKSHOP SERIES', location: 'THE DOJO, IKEJA', lat: 6.605, lng: 3.358, date: 'MAR 12', time: '2:00PM', price: 'FREE', tags: ['WORKSHOP', 'DREAMS', 'GROWTH'], category: 'workshop' },
+  { _id: '6', title: 'NIGHT MARKET: JUNGLE EDITION', location: 'FREEDOM PARK, LAGOS', lat: 6.4531, lng: 3.3958, date: 'APR 20', time: '6:00PM', price: '₦2,000', tags: ['MARKET', 'MUSIC', 'FOOD'], category: 'market' },
 ];
 
-export default function Landing() {
-  const mobile = isMobile();
+const CATEGORIES = ['all', 'conference', 'music', 'art', 'fitness', 'workshop', 'market'];
+
+export default function WakingPage() {
+  const [searchQuery, setSearchQuery] = useState('');
+  // Drawer states: 0 = collapsed (tabs only, always visible), 1 = expanded (shows content), 2 = fully expanded (to search bar)
+  const [drawerState, setDrawerState] = useState(0);
+  const [drawerMode, setDrawerMode] = useState('events'); // 'events' | 'search'
+  const [selectedCategory, setSelectedCategory] = useState('all');
+  const [selectedEvent, setSelectedEvent] = useState(null);
+  const [events, setEvents] = useState([]);
+  const [loading, setLoading] = useState(true);
   const mapRef = useRef(null);
-  const [hasDragged, setHasDragged] = useState(false);
+  const searchInputRef = useRef(null);
 
   useEffect(() => {
-    const timer = setTimeout(() => setHasDragged(true), 3000);
-    return () => clearTimeout(timer);
-  }, []);
-
-  // Calculate dynamic map bounds from entities
-  const mapBounds = useMemo(() => {
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    MAP_ENTITIES.forEach((e) => {
-      const s = getEntitySizing(e.type);
-      minX = Math.min(minX, e.gridX);
-      maxX = Math.max(maxX, e.gridX + s.totalSpace - 1);
-      minY = Math.min(minY, e.gridY);
-      maxY = Math.max(maxY, e.gridY + s.totalSpace - 1);
-    });
-    const buffer = 5;
-    const mnX = Math.floor(minX - buffer);
-    const mxX = Math.floor(maxX + buffer);
-    const mnY = Math.floor(minY - buffer);
-    const mxY = Math.floor(maxY + buffer);
-    const rangeX = mxX - mnX;
-    const rangeY = mxY - mnY;
-    const maxRange = Math.max(rangeX, rangeY);
-    const minCoord = Math.min(mnX, mnY);
-    const maxCoord = minCoord + maxRange;
-    return {
-      minGridCoord: minCoord,
-      maxGridCoord: maxCoord,
-      mapSize: maxRange * GRID_SIZE,
-      gridOffset: -minCoord * GRID_SIZE,
-    };
-  }, []);
-
-  const { mapSize: MAP_SIZE, gridOffset: GRID_OFFSET } = mapBounds;
-
-  // Generate procedural jungle elements
-  const naturalComponents = useMemo(() => {
-    return generateMapElements(
-      mapBounds.minGridCoord,
-      mapBounds.maxGridCoord,
-      mapBounds.minGridCoord,
-      mapBounds.maxGridCoord,
-      MAP_ENTITIES
-    );
-  }, [mapBounds]);
-
-  // Pre-compute pixel positions for all natural elements
-  const naturalWithPositions = useMemo(() => {
-    return naturalComponents.map((comp) => {
-      const x = GRID_OFFSET + comp.gridX * GRID_SIZE;
-      const y = GRID_OFFSET + comp.gridY * GRID_SIZE;
-      let size;
-      if (comp.type === "big-tree") size = GRID_SIZE * 2 * 0.95;
-      else if (comp.type === "small-tree" || comp.type === "palm") size = GRID_SIZE * 2 * 0.62;
-      else size = GRID_SIZE;
-      return { ...comp, px: x, py: y, size };
-    });
-  }, [naturalComponents, GRID_OFFSET]);
-
-  // Viewport culling state
-  const [viewport, setViewport] = useState({ x: 0, y: 0, w: 2000, h: 2000 });
-  const scrollRAF = useRef(null);
-
-  const handleScroll = useCallback(() => {
-    if (scrollRAF.current) return;
-    scrollRAF.current = requestAnimationFrame(() => {
-      scrollRAF.current = null;
-      const el = mapRef.current;
-      if (!el) return;
-      setViewport({
-        x: el.scrollLeft,
-        y: el.scrollTop,
-        w: el.clientWidth,
-        h: el.clientHeight,
-      });
-    });
-  }, []);
-
-  // Visible natural elements (within viewport + buffer)
-  const CULL_BUFFER = 400;
-  const visibleNaturals = useMemo(() => {
-    const vl = viewport.x - CULL_BUFFER;
-    const vr = viewport.x + viewport.w + CULL_BUFFER;
-    const vt = viewport.y - CULL_BUFFER;
-    const vb = viewport.y + viewport.h + CULL_BUFFER;
-    return naturalWithPositions.filter(
-      (c) => c.px + c.size / 2 >= vl && c.px - c.size / 2 <= vr && c.py + c.size / 2 >= vt && c.py - c.size / 2 <= vb
-    );
-  }, [naturalWithPositions, viewport]);
-
-  // Center on Kura (HOME) at (0,0) after mount
-  useEffect(() => {
-    if (mapRef.current) {
-      setTimeout(() => {
-        const container = mapRef.current;
-        const homeX = GRID_OFFSET;
-        const homeY = GRID_OFFSET;
-        container.scrollLeft = homeX - container.clientWidth / 2;
-        container.scrollTop = homeY - container.clientHeight / 2;
-        // Seed initial viewport so culling kicks in immediately
-        setViewport({
-          x: container.scrollLeft,
-          y: container.scrollTop,
-          w: container.clientWidth,
-          h: container.clientHeight,
-        });
-      }, 100);
+    async function fetchEvents() {
+      try {
+        const res = await fetch('/api/events');
+        if (res.ok) {
+          const data = await res.json();
+          setEvents(Array.isArray(data) ? data : []);
+        }
+      } catch (e) {
+        console.log('Events API not available, using mock data');
+      } finally {
+        setLoading(false);
+      }
     }
-  }, [GRID_OFFSET]);
+    fetchEvents();
+  }, []);
 
-  const getPosition = (gridX, gridY) => ({
-    x: GRID_OFFSET + gridX * GRID_SIZE,
-    y: GRID_OFFSET + gridY * GRID_SIZE,
+  const displayEvents = events.length > 0 ? events : MOCK_EVENTS;
+
+  const filteredEvents = displayEvents.filter(ev => {
+    const matchesCategory = selectedCategory === 'all' || ev.category === selectedCategory;
+    const matchesSearch = !searchQuery || 
+      ev.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      ev.location.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      ev.tags?.some(t => t.toLowerCase().includes(searchQuery.toLowerCase()));
+    return matchesCategory && matchesSearch;
   });
 
-  // SVG path lookup — static, never changes
-  const IMAGE_PATHS = {
-    "big-tree-1": `/jungle/Property%201=A.svg`,
-    "big-tree-2": `/jungle/Property%201=B.svg`,
-    "small-tree-1": `/jungle/Property%201=A%20(1).svg`,
-    "small-tree-2": `/jungle/Property%201=B%20(1).svg`,
-    "palm": `/jungle/Property%201=Palm%20Tree.svg`,
-    "shrub": `/jungle/Property%201=Shrubs.svg`,
-    "rock": `/jungle/Property%201=Rocks.svg`,
-    "flowers": `/jungle/Property%201=Flowers.svg`,
+  const handleSearch = (e) => {
+    const val = e.target.value;
+    setSearchQuery(val);
+    if (val.length > 0) {
+      setDrawerMode('search');
+      if (drawerState === 0) setDrawerState(1);
+    } else {
+      setDrawerMode('events');
+    }
   };
 
-  const getImagePath = (comp) => {
-    if (comp.type === "big-tree") return IMAGE_PATHS[`big-tree-${comp.variant || 1}`];
-    if (comp.type === "small-tree") return IMAGE_PATHS[`small-tree-${comp.variant || 1}`];
-    return IMAGE_PATHS[comp.type];
+  const handleDrawerClick = () => {
+    // Cycle: 0 → 1 → 2 → 0
+    setDrawerState(prev => prev === 2 ? 0 : prev + 1);
   };
 
-  // Pre-compute stable entity positions (never change)
-  const entityPositions = useMemo(() => {
-    return MAP_ENTITIES.map((entity) => {
-      const x = GRID_OFFSET + entity.gridX * GRID_SIZE;
-      const y = GRID_OFFSET + entity.gridY * GRID_SIZE;
-      const sizing = getEntitySizing(entity.type);
-      const pixelSize = sizing.iconSize * GRID_SIZE;
-      return { ...entity, x, y, pixelSize };
-    });
-  }, [GRID_OFFSET]);
+  // Drawer height based on state
+  const getDrawerHeight = () => {
+    if (drawerState === 0) return 'auto'; // collapsed — just the handle + tabs
+    if (drawerState === 1) return '55vh'; // expanded — shows content
+    return 'calc(100vh - 120px)'; // fully expanded — to just below search bar
+  };
 
   return (
     <>
       <Head>
-        <title>Lucid Jungles — Jungle Map</title>
+        <title>WAKING | Lucid Jungles — Physical Plane</title>
       </Head>
-      <main className="relative w-[100dvw] h-[100dvh] font-CodeSaver bleed-nav" style={{ backgroundColor: "#0A2A0A" }}>
-        <NavBar audioControls={false} />
 
-        {/* Scrollable jungle map container */}
-        <div
-          ref={mapRef}
-          className="jungle-map-container"
-          onScroll={handleScroll}
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            overflow: "auto",
-            background:
-              "linear-gradient(135deg, #0A2A0A 0%, #1A472A 30%, #2D5A3D 70%, #3D6B4F 100%)",
-          }}
-        >
-          {/* Map content — sized to fit all entities + buffer */}
-          <div
-            style={{
-              position: "relative",
-              width: `${MAP_SIZE}px`,
-              height: `${MAP_SIZE}px`,
-              minWidth: `${MAP_SIZE}px`,
-              minHeight: `${MAP_SIZE}px`,
-            }}
+      <div className="bleed-nav relative w-full h-screen overflow-hidden bg-secondary">
+        {/* ── Search Bar ── */}
+        <div className="absolute top-4 left-4 right-4 z-30">
+          <div className="flex items-center gap-2 bg-secondary/90 backdrop-blur-md border border-primary/20 rounded-lg px-4 py-2.5"
+            onClick={() => searchInputRef.current?.focus()}
           >
-            {/* Foliage background pattern */}
-            <div
-              style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                width: "100%",
-                height: "100%",
-                backgroundImage: `url("data:image/svg+xml,%3Csvg width='200' height='200' viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M11 18c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm48 25c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm-43-7c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zm63 31c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM34 90c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zm56-76c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM12 86c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm28-65c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm23-11c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm-6 60c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm29 22c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zM32 63c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm57-13c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm-9-21c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM60 91c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM35 41c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM12 60c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2z' fill='%2316a34a' fill-opacity='0.08' fill-rule='evenodd'/%3E%3C/svg%3E")`,
-                opacity: 0.4,
-                pointerEvents: "none",
-                zIndex: 2,
-              }}
+            <Search size={14} className="text-primary/40 flex-shrink-0" />
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={searchQuery}
+              onChange={handleSearch}
+              onFocus={() => searchQuery && (setDrawerMode('search'), drawerState === 0 && setDrawerState(1))}
+              placeholder="Search events, locations, tags..."
+              className="flex-1 bg-transparent border-none outline-none text-xs text-primary placeholder-primary/30 font-mono tracking-wider"
             />
-
-            {/* Fine grid lines */}
-            <div
-              style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                width: "100%",
-                height: "100%",
-                backgroundImage: `
-                  linear-gradient(to right, rgba(171, 212, 158, 0.05) 1px, transparent 1px),
-                  linear-gradient(to bottom, rgba(171, 212, 158, 0.05) 1px, transparent 1px)
-                `,
-                backgroundSize: `${GRID_SIZE}px ${GRID_SIZE}px`,
-                pointerEvents: "none",
-                zIndex: 5,
-              }}
-            />
-
-            {/* Coarse grid lines (every 5 squares) */}
-            <div
-              style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                width: "100%",
-                height: "100%",
-                backgroundImage: `
-                  linear-gradient(to right, rgba(171, 212, 158, 0.1) 2px, transparent 2px),
-                  linear-gradient(to bottom, rgba(171, 212, 158, 0.1) 2px, transparent 2px)
-                `,
-                backgroundSize: `${GRID_SIZE * 5}px ${GRID_SIZE * 5}px`,
-                pointerEvents: "none",
-                zIndex: 5,
-              }}
-            />
-
-            {/* SVG dashed paths connecting entities to Kura */}
-            <svg
-              style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                width: "100%",
-                height: "100%",
-                pointerEvents: "none",
-                zIndex: 15,
-              }}
-            >
-              {MAP_ENTITIES.filter((e) => e.id !== "kura").map((entity) => {
-                const kuraPos = getPosition(0, 0);
-                const entityPos = getPosition(entity.gridX, entity.gridY);
-                const sizing = getEntitySizing(entity.type);
-                const halfIcon = (sizing.iconSize * GRID_SIZE) / 2;
-                return (
-                  <line
-                    key={`path-${entity.id}`}
-                    x1={kuraPos.x + GRID_SIZE / 2}
-                    y1={kuraPos.y + GRID_SIZE / 2}
-                    x2={entityPos.x + halfIcon}
-                    y2={entityPos.y + halfIcon}
-                    stroke={
-                      entity.type === "building"
-                        ? "rgba(139, 92, 246, 0.25)"
-                        : "rgba(171, 212, 158, 0.25)"
-                    }
-                    strokeWidth="2"
-                    strokeDasharray="8,6"
-                  />
-                );
-              })}
-            </svg>
-
-            {/* Procedural natural elements — viewport-culled */}
-            {visibleNaturals.map((comp) => (
-              <img
-                key={comp.id}
-                src={getImagePath(comp)}
-                alt=""
-                loading="lazy"
-                decoding="async"
-                style={{
-                  position: "absolute",
-                  left: comp.px,
-                  top: comp.py,
-                  width: comp.size,
-                  height: comp.size,
-                  transform: "translate(-50%, -50%)",
-                  zIndex: comp.type.includes("tree") || comp.type === "palm" ? 35 : 32,
-                  objectFit: "contain",
-                  pointerEvents: "none",
-                }}
-              />
-            ))}
-
-            {/* OG entity components */}
-            {entityPositions.map((entity) => (
-              <div
-                key={entity.id}
-                style={{
-                  position: "absolute",
-                  left: entity.x,
-                  top: entity.y,
-                  width: entity.pixelSize,
-                  height: entity.pixelSize,
-                  zIndex: entity.type === "building" ? 50 : 40,
-                  overflow: "visible",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                {entity.id === "kura" && <KuraNode data={{}} />}
-                {entity.id === "moj" && <MojNode data={{}} />}
-                {entity.id === "ccstudios" && <CCStudiosNode data={{}} />}
-                {entity.id === "bonzo" && <BonzoNode2 data={{}} />}
-                {entity.id === "dojo" && <DojoNode data={{}} />}
-                <div
-                  style={{
-                    position: "absolute",
-                    bottom: -28,
-                    left: "50%",
-                    transform: "translateX(-50%)",
-                    backgroundColor: "#151413",
-                    color: entity.type === "building" ? "#8B5CF6" : "#ABD49E",
-                    padding: "3px 10px",
-                    borderRadius: 4,
-                    fontSize: 10,
-                    fontWeight: "bold",
-                    whiteSpace: "nowrap",
-                    border: `1px solid ${entity.type === "building" ? "#8B5CF6" : "#ABD49E"}`,
-                    fontFamily: "CodeSaver, monospace",
-                    letterSpacing: 0.5,
-                    zIndex: 41,
-                  }}
-                >
-                  {entity.name}
-                </div>
-              </div>
-            ))}
+            {searchQuery && (
+              <button onClick={() => { setSearchQuery(''); setDrawerMode('events'); }} className="flex-shrink-0">
+                <X size={14} className="text-primary/40 hover:text-primary" />
+              </button>
+            )}
           </div>
         </div>
 
-        {/* Explore hint toast */}
-        <div
-          className={`absolute bottom-[8%] left-1/2 -translate-x-1/2 z-50 w-max h-max px-6 py-4 transition-all ease-in-out duration-500 text-sm md:text-lg font-semibold pointer-events-none ${
-            hasDragged ? "opacity-0" : "opacity-100"
-          }`}
-          style={{
-            backgroundColor: "#151413",
-            color: "#ABD49E",
-            border: "1px solid #ABD49E",
-            borderRadius: "4px",
-            fontFamily: "CodeSaver, monospace",
-          }}
-        >
-          SCROLL TO EXPLORE THE JUNGLE MAP
-        </div>
-      </main>
+        {/* ── Map Area ── */}
+        <div ref={mapRef} className="absolute inset-0 bg-[#1a1a2e]">
+          {/* Stylized map background — grid with city blocks */}
+          <div className="absolute inset-0 opacity-20">
+            <div className="absolute inset-0" style={{
+              backgroundImage: `
+                linear-gradient(to right, rgba(171,212,158,0.08) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(171,212,158,0.08) 1px, transparent 1px)
+              `,
+              backgroundSize: '60px 60px',
+            }} />
+            <div className="absolute inset-0" style={{
+              backgroundImage: `
+                linear-gradient(to right, rgba(171,212,158,0.15) 2px, transparent 2px),
+                linear-gradient(to bottom, rgba(171,212,158,0.15) 2px, transparent 2px)
+              `,
+              backgroundSize: '300px 300px',
+            }} />
+          </div>
 
-      <style jsx global>{`
-        .jungle-map-container {
-          scrollbar-width: thin;
-          scrollbar-color: #ABD49E #151413;
-          cursor: grab;
-          touch-action: pan-x pan-y;
-          overscroll-behavior: contain;
-          -webkit-overflow-scrolling: touch;
-        }
-        .jungle-map-container:active {
-          cursor: grabbing;
-        }
-        .jungle-map-container::-webkit-scrollbar {
-          width: 10px;
-          height: 10px;
-        }
-        .jungle-map-container::-webkit-scrollbar-track {
-          background: #151413;
-        }
-        .jungle-map-container::-webkit-scrollbar-thumb {
-          background-color: #ABD49E;
-          border-radius: 5px;
-          border: 2px solid #151413;
-        }
-        .jungle-map-container::-webkit-scrollbar-corner {
-          background: #151413;
-        }
-      `}</style>
+          {/* Decorative map elements — stylized city blocks */}
+          {[
+            { x: '15%', y: '20%', w: '8%', h: '6%' },
+            { x: '45%', y: '15%', w: '12%', h: '8%' },
+            { x: '70%', y: '25%', w: '6%', h: '10%' },
+            { x: '25%', y: '50%', w: '10%', h: '6%' },
+            { x: '55%', y: '55%', w: '8%', h: '12%' },
+            { x: '80%', y: '60%', w: '10%', h: '6%' },
+            { x: '10%', y: '70%', w: '6%', h: '8%' },
+            { x: '40%', y: '75%', w: '14%', h: '6%' },
+          ].map((block, i) => (
+            <div key={i} className="absolute border border-primary/10 rounded-sm"
+              style={{ left: block.x, top: block.y, width: block.w, height: block.h, background: 'rgba(171,212,158,0.03)' }}
+            />
+          ))}
+
+          {/* Event pins on map */}
+          {displayEvents.map((event) => {
+            const x = ((event.lng - 3.3) / 0.2) * 15 + 20;
+            const y = ((6.65 - event.lat) / 0.3) * 20 + 15;
+            const isSelected = selectedEvent?._id === event._id;
+
+            return (
+              <div key={event._id}
+                className="absolute z-10 cursor-pointer transition-all duration-200"
+                style={{ left: `${x}%`, top: `${y}%`, transform: 'translate(-50%, -100%)' }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedEvent(isSelected ? null : event);
+                }}
+              >
+                <div className={`flex flex-col items-center transition-transform duration-200 ${isSelected ? 'scale-125' : 'hover:scale-110'}`}>
+                  <div className="w-8 h-8 flex items-center justify-center rounded-full"
+                    style={{
+                      background: isSelected ? '#ABD49E' : '#151413',
+                      border: `2px solid ${isSelected ? '#151413' : '#ABD49E'}`,
+                    }}
+                  >
+                    <MapPin size={14} color={isSelected ? '#151413' : '#ABD49E'} />
+                  </div>
+                  <span className="mt-1 text-[7px] font-bold tracking-wider text-primary/70 whitespace-nowrap px-1"
+                    style={{ textShadow: '0 0 4px rgba(0,0,0,0.9)' }}
+                  >
+                    {event.title.substring(0, 20)}...
+                  </span>
+                </div>
+
+                {isSelected && (
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-20" style={{ minWidth: 220 }}
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <div className="bg-secondary border border-primary/30 rounded-lg p-3 shadow-xl">
+                      <h3 className="text-xs font-bold text-primary mb-1 tracking-wide">{event.title}</h3>
+                      <div className="space-y-1 mb-2">
+                        <p className="text-[9px] text-primary/50 flex items-center gap-1">
+                          <MapPin size={8} /> {event.location}
+                        </p>
+                        <p className="text-[9px] text-primary/50 flex items-center gap-1">
+                          <Calendar size={8} /> {event.date} · <Clock size={8} /> {event.time}
+                        </p>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-bold text-[#8B5CF6]">{event.price}</span>
+                        <Link href={`/events/${event._id}`}
+                          className="text-[8px] text-primary/40 hover:text-primary flex items-center gap-1"
+                        >
+                          DETAILS <ArrowRight size={8} />
+                        </Link>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {/* Center marker */}
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20">
+            <div className="relative">
+              <div className="w-4 h-4 bg-[#8B5CF6] rounded-full animate-pulse opacity-50" />
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-2 h-2 bg-[#8B5CF6] rounded-full" />
+            </div>
+          </div>
+        </div>
+
+        {/* ── FABs (Floating Action Buttons) — from UPDATED ── */}
+        <div className="fixed flex flex-col items-center z-[60]" style={{ right: 20, bottom: '200px' }}>
+          <Link href="/createevents">
+            <button className="w-[54px] h-[54px] bg-[#151413] text-[#ABD49E] shadow-lg flex items-center justify-center border border-[#ABD49E] text-3xl font-bold rounded-full mb-2 hover:bg-[#ABD49E] hover:text-[#151413] transition-all">
+              <Plus size={24} />
+            </button>
+          </Link>
+          <button className="w-[54px] h-[54px] bg-[#151413] text-[#ABD49E] shadow-lg flex items-center justify-center text-2xl border border-[#ABD49E] font-bold rounded-full hover:bg-[#ABD49E] hover:text-[#151413] transition-all">
+            <Compass size={22} />
+          </button>
+        </div>
+
+        {/* ── Map overlay controls ── */}
+        <div className="absolute bottom-24 right-4 z-20 flex flex-col gap-2">
+          <button className="w-10 h-10 bg-secondary/90 backdrop-blur-md border border-primary/20 rounded-lg flex items-center justify-center hover:border-primary/40 transition-all">
+            <Navigation size={16} className="text-primary/60" />
+          </button>
+          <button className="w-10 h-10 bg-secondary/90 backdrop-blur-md border border-primary/20 rounded-lg flex items-center justify-center hover:border-primary/40 transition-all">
+            <Filter size={16} className="text-primary/60" />
+          </button>
+        </div>
+
+        {/* ── Always-Visible Bottom Drawer ── */}
+        <div className="fixed bottom-0 left-0 right-0 z-[100]"
+          style={{ bottom: '75px' }} // sits right above bottom nav
+        >
+          <div className="bg-secondary border-t border-primary/20 rounded-t-xl"
+            style={{ maxHeight: getDrawerHeight(), transition: 'max-height 0.3s ease-in-out' }}
+          >
+            {/* ── Clickable Handle (cycles through states) ── */}
+            <div className="flex flex-col items-center pt-2 pb-1 cursor-pointer hover:bg-primary/5 transition-colors"
+              onClick={handleDrawerClick}
+            >
+              <div className="w-10 h-1 bg-primary/30 rounded-full mb-1" />
+              {drawerState === 0 && <ChevronUp size={12} className="text-primary/30" />}
+              {drawerState === 1 && <ChevronUp size={12} className="text-primary/50" />}
+              {drawerState === 2 && <ChevronDown size={12} className="text-primary/50" />}
+            </div>
+
+            {/* ── Drawer tabs (always visible) ── */}
+            <div className="flex items-center justify-between px-4 py-2 border-b border-primary/10 flex-shrink-0">
+              <div className="flex gap-4">
+                <button onClick={() => setDrawerMode('events')}
+                  className={`text-[9px] font-bold tracking-wider pb-1 border-b-2 transition-colors ${
+                    drawerMode === 'events' ? 'text-primary border-primary' : 'text-primary/40 border-transparent'
+                  }`}
+                >
+                  EVENTS
+                </button>
+                <button onClick={() => setDrawerMode('search')}
+                  className={`text-[9px] font-bold tracking-wider pb-1 border-b-2 transition-colors ${
+                    drawerMode === 'search' ? 'text-primary border-primary' : 'text-primary/40 border-transparent'
+                  }`}
+                >
+                  SEARCH
+                </button>
+              </div>
+              <span className="text-[8px] text-primary/30 tracking-wider">
+                {filteredEvents.length} EVENTS
+              </span>
+            </div>
+
+            {/* ── Content (only visible when expanded) ── */}
+            {drawerState > 0 && (
+              <>
+                {/* Category filters */}
+                {drawerMode === 'events' && (
+                  <div className="flex gap-2 px-4 py-3 overflow-x-auto scrollbar-none border-b border-primary/10 flex-shrink-0">
+                    {CATEGORIES.map(cat => (
+                      <button key={cat}
+                        onClick={() => setSelectedCategory(cat)}
+                        className={`text-[8px] font-bold tracking-wider px-3 py-1.5 rounded-full whitespace-nowrap transition-all ${
+                          selectedCategory === cat
+                            ? 'bg-primary text-secondary'
+                            : 'bg-transparent border border-primary/20 text-primary/50 hover:border-primary/40'
+                        }`}
+                      >
+                        {cat.toUpperCase()}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Drawer content — pb-20 accounts for bottom nav bar */}
+                <div className="overflow-y-auto px-4 pb-20" style={{ maxHeight: drawerState === 2 ? 'calc(100vh - 280px)' : 'calc(55vh - 160px)' }}>
+                  {drawerMode === 'search' && searchQuery && (
+                    <div className="py-3">
+                      <p className="text-[9px] text-primary/40 mb-3 tracking-wider">
+                        SEARCH RESULTS FOR &ldquo;{searchQuery}&rdquo;
+                      </p>
+                      {filteredEvents.length === 0 ? (
+                        <p className="text-xs text-primary/30 text-center py-8">No results found</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {filteredEvents.map(event => (
+                            <EventListItem key={event._id} event={event} />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {drawerMode === 'events' && (
+                    <div className="py-3 space-y-2">
+                      {filteredEvents.length === 0 ? (
+                        <p className="text-xs text-primary/30 text-center py-8">No events in this category</p>
+                      ) : (
+                        filteredEvents.map(event => (
+                          <EventListItem key={event._id} event={event} />
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
     </>
+  );
+}
+
+function EventListItem({ event }) {
+  return (
+    <Link href={`/events/${event._id}`}
+      className="block border border-primary/10 rounded-lg p-3 hover:border-primary/30 transition-all group"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <h3 className="text-xs font-bold tracking-wide text-primary mb-1 truncate">{event.title}</h3>
+          <div className="flex flex-wrap gap-2 text-[8px] text-primary/40">
+            <span className="flex items-center gap-1"><MapPin size={8} /> {event.location}</span>
+            <span className="flex items-center gap-1"><Calendar size={8} /> {event.date}</span>
+            <span className="flex items-center gap-1"><Clock size={8} /> {event.time}</span>
+          </div>
+          {event.tags && (
+            <div className="flex gap-1.5 mt-1.5">
+              {event.tags.slice(0, 3).map(tag => (
+                <span key={tag} className="text-[7px] px-1.5 py-0.5 border border-primary/10 text-primary/30 rounded-sm">
+                  {tag}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+        <span className="text-[10px] font-bold text-[#8B5CF6] whitespace-nowrap flex-shrink-0">{event.price}</span>
+      </div>
+    </Link>
   );
 }
