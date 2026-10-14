@@ -1,0 +1,30 @@
+{
+  "id": "/",
+  "name": "Lucid Jungles",
+  "short_name": "Jungles",
+  "description": "A living digital lifestyle world. Build your base, join creator communities, buy from real storefronts, and rise through the ranks.",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#151413",
+  "theme_color": "#151413",
+  "categories": ["social", "shopping", "entertainment"],
+  "lang": "en-NG",
+  "dir": "ltr",
+  "icons": [
+    {
+      "src": "/assets/LOGO.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    { "name": "Your base", "url": "/home" },
+    { "name": "The jungle", "url": "/jungle" },
+    { "name": "Store", "url": "/store" },
+    { "name": "Events", "url": "/events" }
+  ]
+}

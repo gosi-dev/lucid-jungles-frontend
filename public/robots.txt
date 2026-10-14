@@ -1,0 +1,19 @@
+# Lucid Jungles — https://lucidjungles.io
+User-agent: *
+Allow: /
+
+# Do not index transactional or private surfaces
+Disallow: /api/
+Disallow: /cart
+Disallow: /checkout
+Disallow: /orders
+Disallow: /settings
+Disallow: /signin
+Disallow: /signup
+Disallow: /forgot-password
+Disallow: /reset-password
+Disallow: /invitation/
+Disallow: /profile/
+Disallow: /tkxts/
+
+Sitemap: https://lucidjungles.io/sitemap.xml

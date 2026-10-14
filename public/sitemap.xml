@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Lucid Jungles sitemap.
+  Domain confirmed from OG/nginx.conf (server_name lucidjungles.io www.lucidjungles.io).
+
+  Only stable public routes are listed. Dynamic and private surfaces
+  (/profile/*, /tkxts/*, /invitation/*, /cart, /checkout, /orders, /settings)
+  are excluded and blocked in robots.txt.
+
+  lastmod is set at generation; bump it when a listed route changes materially.
+-->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+
+  <!-- Core world -->
+  <url><loc>https://lucidjungles.io/</loc><changefreq>weekly</changefreq><priority>1.0</priority></url>
+  <url><loc>https://lucidjungles.io/jungle</loc><changefreq>weekly</changefreq><priority>0.9</priority></url>
+  <url><loc>https://lucidjungles.io/world</loc><changefreq>weekly</changefreq><priority>0.9</priority></url>
+  <url><loc>https://lucidjungles.io/home</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+
+  <!-- Community -->
+  <url><loc>https://lucidjungles.io/fanbase</loc><changefreq>daily</changefreq><priority>0.9</priority></url>
+  <url><loc>https://lucidjungles.io/feed</loc><changefreq>daily</changefreq><priority>0.8</priority></url>
+  <url><loc>https://lucidjungles.io/dojo</loc><changefreq>weekly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://lucidjungles.io/moj</loc><changefreq>weekly</changefreq><priority>0.6</priority></url>
+  <url><loc>https://lucidjungles.io/immersive</loc><changefreq>weekly</changefreq><priority>0.7</priority></url>
+
+  <!-- Commerce & events -->
+  <url><loc>https://lucidjungles.io/store</loc><changefreq>daily</changefreq><priority>0.9</priority></url>
+  <url><loc>https://lucidjungles.io/events</loc><changefreq>daily</changefreq><priority>0.9</priority></url>
+
+  <!-- Progression -->
+  <url><loc>https://lucidjungles.io/kura</loc><changefreq>weekly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://lucidjungles.io/quests</loc><changefreq>weekly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://lucidjungles.io/status</loc><changefreq>weekly</changefreq><priority>0.6</priority></url>
+
+  <!-- Informational -->
+  <url><loc>https://lucidjungles.io/about-us</loc><changefreq>monthly</changefreq><priority>0.5</priority></url>
+
+</urlset>
