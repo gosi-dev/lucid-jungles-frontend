@@ -1,36 +1,662 @@
-// pages/[username].js — Entry Preview / User Base
-// Design reference: /Frames/User-base/USER BASE/ (frames 2–11)
-import { useState, useRef, useEffect, useCallback } from 'react';
+// [username].js — User Base (fusion of OG's [username].js + Kura + Dreamlog + Dojo)
+// Design: Frozen-canvas jungle map with dream desk, profile drawer, tabs for
+// HOME (desk + jungle), KURA (AI companion), DREAMS (journal), DOJO (fitness)
+// The jungle trees around the user icon match the dreaming.js procedural map.
+
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
-import { useSelector } from 'react-redux';
-import EventCard from '../components/EventCard';
-import ProductsCard from '../components/ProductsCard';
+import { useHideBottomNav } from '../hooks/useHideBottomNav';
+// Kept from rebuilt's previous /[username].js (commit da91698): the dynamic
+// single-segment route must not fabricate a base for a typo. See the route gate
+// at the bottom of this file.
 import NotFoundScreen from '../components/NotFoundScreen';
-import VitalBars, { deriveVitals } from '../components/VitalBars';
 import { useUsernameLookup, USER_LOOKUP } from '../hooks/useUsernameLookup';
 import { useBaseLookup, BASE_LOOKUP } from '../hooks/useBaseLookup';
+import {
+  FaCaretRight, FaChevronUp, FaChevronDown, FaUserFriends,
+  Sparkles, Send, Heart, MessageCircle, Zap, ArrowLeft,
+  BookOpen, Plus, Moon, Star, Dumbbell, Target, Clock, Flame,
+  User, Settings, Ticket, ShoppingBag, LogOut, ChevronRight,
+} from 'lucide-react';
 
+// ─── Grid constants (matching dreaming.js) ───
+const GRID_SIZE = 77;
 
-const DESK_ITEMS = ['JOURNAL', 'RADIO', 'PORTFOLIO', 'SLUM BOOK'];
-
-// Dream Desk asset SVGs
-// Assets in: /public/Frames/User-base/USER BASE/Dream Desk assets/
-const DD = '/Frames/User-base/USER%20BASE/Dream%20Desk%20assets';
-const DESK = {
-  TABLE:     `${DD}/Table.svg`,
-  CHAIR:     `${DD}/Chair.svg`,
-  COMPUTER:  `${DD}/Computer.svg`,
-  JOURNAL:   `${DD}/Journal%202.svg`,
-  RADIO:     `${DD}/Radio.svg`,
-  PORTFOLIO: `${DD}/Portfolio.svg`,
-  SLUMBOOK:  `${DD}/Slumbook.svg`,
-  BOOKPILE:  `${DD}/Book%20Pile.svg`,
-  BOXES:     `${DD}/Group%20of%20Boxes.svg`,
+// ─── Seeded random (deterministic, matching dreaming.js) ───
+const seededRandom = (seed) => {
+  const x = Math.sin(seed) * 10000;
+  return x - Math.floor(x);
 };
 
-// ─── Icons ────────────────────────────────────────────────────────────────────
+// ─── Entity sizing (matching dreaming.js) ───
+const getEntitySizing = (type) => {
+  if (type === 'building') return { iconSize: 5, totalSpace: 5 };
+  if (type === 'community') return { iconSize: 5, totalSpace: 5 };
+  return { iconSize: 1, totalSpace: 1 };
+};
 
+// ─── Full world entities (same coordinates as dreaming.js) ───
+const MAP_ENTITIES = [
+  { id: 'kura', type: 'user', gridX: 0, gridY: 0, name: 'YOUR KURA', href: '/kura' },
+  { id: 'bonzo', type: 'user', gridX: -3, gridY: 7, name: 'BONZO', href: '/bonzo' },
+  { id: 'moj', type: 'community', gridX: -12, gridY: -5, name: 'OLD SECRETARIAT', href: '/moj' },
+  { id: 'ccstudios', type: 'community', gridX: 8, gridY: 3, name: 'CAPPUCCINO STUDIOX', href: '/cappuccinostudiox' },
+  { id: 'dojo', type: 'community', gridX: 14, gridY: -8, name: "BONZO'S DOJO", href: '/dojo' },
+];
+
+function resolveUserGridPosition(username) {
+  const key = (username || '').toLowerCase();
+  const matched = MAP_ENTITIES.find((entity) => entity.id === key && entity.type === 'user');
+  if (matched) return {
+    gridX: matched.gridX,
+    gridY: matched.gridY,
+  };
+  return {
+    gridX: 0,
+    gridY: 0,
+  };
+}
+
+const generateMapElements = (minX, maxX, minY, maxY, allEntities) => {
+  const components = [];
+  const occupiedPositions = new Set();
+  const bigTreePositions = new Set();
+
+  const getEntityZone = (x, y) => {
+    for (const entity of allEntities) {
+      const sizing = getEntitySizing(entity.type);
+      const iconSize = sizing.iconSize;
+      const totalSpace = sizing.totalSpace;
+      const spaceEndX = entity.gridX + totalSpace - 1;
+      const spaceEndY = entity.gridY + totalSpace - 1;
+
+      if (x < entity.gridX || x > spaceEndX || y < entity.gridY || y > spaceEndY) continue;
+
+      const iconEndX = entity.gridX + iconSize - 1;
+      const iconEndY = entity.gridY + iconSize - 1;
+
+      if (entity.type === 'user') {
+        if (x === entity.gridX && y === entity.gridY) {
+          return { zone: 'user-icon', entity, sizing };
+        }
+        return { zone: 'user-buffer', entity, sizing };
+      }
+
+      const inIcon = x >= entity.gridX && x <= iconEndX && y >= entity.gridY && y <= iconEndY;
+      if (inIcon) {
+        const onEdge = x === entity.gridX || x === iconEndX || y === entity.gridY || y === iconEndY;
+        return {
+          zone: onEdge ? 'community-icon-border' : 'community-icon-center',
+          entity,
+          sizing,
+        };
+      }
+
+      return { zone: 'community-buffer', entity, sizing };
+    }
+
+    return { zone: 'unoccupied' };
+  };
+
+  const checkNaturalCollision2x2 = (x, y) => {
+    for (let dx = -1; dx <= 0; dx++) {
+      for (let dy = -1; dy <= 0; dy++) {
+        if (occupiedPositions.has(`${x + dx},${y + dy}`)) return true;
+      }
+    }
+    return false;
+  };
+
+  const canBigTreeSpawn = (x, y) => {
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        if (bigTreePositions.has(`${x + dx},${y + dy}`)) return false;
+      }
+    }
+    return true;
+  };
+
+  const isAdjacentToCommunityIcon = (x, y) => {
+    for (let dx = -1; dx <= 0; dx++) {
+      for (let dy = -1; dy <= 0; dy++) {
+        for (let ax = -1; ax <= 1; ax++) {
+          for (let ay = -1; ay <= 1; ay++) {
+            const z = getEntityZone(x + dx + ax, y + dy + ay);
+            if (z.zone === 'community-icon-center' || z.zone === 'community-icon-border') return true;
+          }
+        }
+      }
+    }
+    return false;
+  };
+
+  // PASS 1: 2x2 trees on grid vertices
+  for (let x = minX; x <= maxX; x++) {
+    for (let y = minY; y <= maxY; y++) {
+      const seed = x * 1000 + y;
+      const rand = seededRandom(seed);
+      let canSpawnBigTree = true;
+      let canSpawnSmallTree = true;
+      let lowestSpawnChance = 1.0;
+      let blocked = false;
+      let touchesCommunityIcon = false;
+      let allUnoccupied = true;
+
+      for (let dx = -1; dx <= 0 && !blocked; dx++) {
+        for (let dy = -1; dy <= 0 && !blocked; dy++) {
+          const zoneInfo = getEntityZone(x + dx, y + dy);
+
+          switch (zoneInfo.zone) {
+            case 'user-icon':
+            case 'community-icon-center':
+              blocked = true;
+              break;
+            case 'community-icon-border':
+              touchesCommunityIcon = true;
+              canSpawnBigTree = false;
+              allUnoccupied = false;
+              lowestSpawnChance = Math.min(lowestSpawnChance, 0.50);
+              break;
+            case 'community-buffer':
+              canSpawnBigTree = false;
+              allUnoccupied = false;
+              lowestSpawnChance = Math.min(lowestSpawnChance, 0.65);
+              break;
+            case 'user-buffer':
+              allUnoccupied = false;
+              lowestSpawnChance = Math.min(lowestSpawnChance, 0.70);
+              break;
+            default:
+              lowestSpawnChance = Math.min(lowestSpawnChance, 0.92);
+              break;
+          }
+        }
+      }
+
+      if (blocked) continue;
+
+      if (touchesCommunityIcon && canSpawnSmallTree) {
+        for (let dx = -1; dx <= 0; dx++) {
+          for (let dy = -1; dy <= 0; dy++) {
+            const z = getEntityZone(x + dx, y + dy);
+            if (z.zone !== 'community-icon-border') {
+              canSpawnSmallTree = false;
+              break;
+            }
+          }
+          if (!canSpawnSmallTree) break;
+        }
+        if (!canSpawnSmallTree) continue;
+      }
+
+      if (canSpawnBigTree && isAdjacentToCommunityIcon(x, y)) {
+        canSpawnBigTree = false;
+      }
+
+      if (!allUnoccupied && checkNaturalCollision2x2(x, y)) continue;
+
+      if (rand < lowestSpawnChance) {
+        const typeRand = seededRandom(seed + 777);
+
+        if (canSpawnBigTree && typeRand < 0.40 && (allUnoccupied || canBigTreeSpawn(x, y))) {
+          const variant = seededRandom(seed + 999) < 0.5 ? 1 : 2;
+          components.push({ id: `big-tree-${x}-${y}`, type: 'big-tree', variant, gridX: x, gridY: y });
+          bigTreePositions.add(`${x},${y}`);
+          for (let dx = -1; dx <= 0; dx++) {
+            for (let dy = -1; dy <= 0; dy++) {
+              occupiedPositions.add(`${x + dx},${y + dy}`);
+            }
+          }
+        } else if (canSpawnSmallTree && typeRand >= 0.40) {
+          const isPalm = seededRandom(seed + 888) < 0.20;
+          const variant = seededRandom(seed + 777) < 0.5 ? 1 : 2;
+          components.push({
+            id: `${isPalm ? 'palm' : 'small-tree'}-${x}-${y}`,
+            type: isPalm ? 'palm' : 'small-tree',
+            variant: isPalm ? undefined : variant,
+            gridX: x,
+            gridY: y,
+          });
+          for (let dx = -1; dx <= 0; dx++) {
+            for (let dy = -1; dy <= 0; dy++) {
+              occupiedPositions.add(`${x + dx},${y + dy}`);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // PASS 2: 1x1 ground cover
+  for (let x = minX; x <= maxX; x++) {
+    for (let y = minY; y <= maxY; y++) {
+      const seed = x * 2000 + y + 5000;
+      const rand = seededRandom(seed);
+      const zoneInfo = getEntityZone(x, y);
+      let spawnChance = 0;
+
+      switch (zoneInfo.zone) {
+        case 'user-icon':
+        case 'community-icon-center':
+        case 'community-icon-border':
+          continue;
+        case 'community-buffer':
+          spawnChance = 0.50;
+          break;
+        case 'user-buffer':
+          spawnChance = 0.60;
+          break;
+        default:
+          spawnChance = 0.92;
+          break;
+      }
+
+      if (occupiedPositions.has(`${x},${y}`)) continue;
+      if (rand < spawnChance) {
+        const typeRand = seededRandom(seed + 12345);
+        let type;
+
+        if (typeRand < 0.30) type = 'shrub';
+        else if (typeRand < 0.55) type = 'rock';
+        else if (typeRand < 0.80) type = 'flowers';
+        else type = 'small-tree-extra';
+
+        components.push({ id: `${type}-${x}-${y}`, type, gridX: x + 0.5, gridY: y + 0.5 });
+        occupiedPositions.add(`${x},${y}`);
+      }
+    }
+  }
+
+  return components;
+};
+
+const IMAGE_PATHS = {
+  'big-tree-1': '/jungle/Property%201=A.svg',
+  'big-tree-2': '/jungle/Property%201=B.svg',
+  'small-tree-1': '/jungle/Property%201=A%20(1).svg',
+  'small-tree-2': '/jungle/Property%201=B%20(1).svg',
+  palm: '/jungle/Property%201=Palm%20Tree.svg',
+  shrub: '/jungle/Property%201=Shrubs.svg',
+  rock: '/jungle/Property%201=Rocks.svg',
+  flowers: '/jungle/Property%201=Flowers.svg',
+  'small-tree-extra': '/jungle/Property%201=Shrubs.svg',
+};
+
+const getImagePath = (comp) => {
+  if (comp.type === 'big-tree') return IMAGE_PATHS[`big-tree-${comp.variant || 1}`];
+  if (comp.type === 'small-tree') return IMAGE_PATHS[`small-tree-${comp.variant || 1}`];
+  return IMAGE_PATHS[comp.type];
+};
+/*
+            {deskCustomizerOpen && currentCustomizerItem && (
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  backgroundColor: '#101010',
+                  zIndex: 30,
+                  overflow: 'hidden',
+                }}
+                onClick={() => setDeskCustomizerOpen(false)}
+              >
+                <div
+                  style={{
+                    position: 'absolute',
+                    inset: isDesktop ? 10 : 8,
+                    border: `solid ${isDesktop ? 5 : 3}px #ABD49E`,
+                    pointerEvents: 'none',
+                    zIndex: 1,
+                  }}
+                />
+
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: isDesktop ? 34 : 20,
+                    left: isDesktop ? 44 : 24,
+                    width: isDesktop ? 52 : 40,
+                    height: isDesktop ? 52 : 40,
+                    borderRadius: '999px',
+                    border: '1.5px solid #ABD49E',
+                    background: '#101010',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#ABD49E',
+                    fontSize: isDesktop ? 18 : 16,
+                    lineHeight: 1,
+                    cursor: 'pointer',
+                    zIndex: 5,
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setDeskCustomizerOpen(false);
+                  }}
+                >
+                  ↩
+                </div>
+
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: isDesktop ? 30 : 18,
+                    right: isDesktop ? 34 : 20,
+                    display: 'flex',
+                    gap: isDesktop ? 10 : 8,
+                    alignItems: 'stretch',
+                    zIndex: 6,
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div
+                    style={{
+                      background: '#101010',
+                      border: '1px solid #ABD49E',
+                      padding: isDesktop ? '8px 16px' : '6px 10px',
+                      color: '#ABD49E',
+                      fontFamily: 'monospace',
+                      fontSize: isDesktop ? 16 : 11,
+                      letterSpacing: '0.14em',
+                      textTransform: 'uppercase',
+                      whiteSpace: 'nowrap',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    BASE CUSTOMIZER
+                  </div>
+                  <button
+                    type="button"
+                    style={{
+                      width: isDesktop ? 62 : 44,
+                      height: isDesktop ? 62 : 44,
+                      border: '1px solid #ABD49E',
+                      background: '#101010',
+                      color: '#ABD49E',
+                      fontSize: isDesktop ? 24 : 20,
+                      lineHeight: 1,
+                      cursor: 'pointer',
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDeskCustomizerOpen(false);
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: isDesktop ? 172 : 132,
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    width: isDesktop ? 'min(1280px, 92vw)' : '92vw',
+                    height: isDesktop ? 390 : 272,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 4,
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div
+                    style={{
+                      position: 'absolute',
+                      left: isDesktop ? 2 : 0,
+                      top: isDesktop ? 38 : 24,
+                      width: isDesktop ? 208 : 124,
+                      height: isDesktop ? 160 : 96,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      opacity: 0.9,
+                      zIndex: 1,
+                      pointerEvents: 'none',
+                    }}
+                  >
+                    <img
+                      src={DREAM_DESK_ITEMS[DESK_CUSTOMIZER_ITEMS[(deskCustomizerIndex === 0 ? DESK_CUSTOMIZER_ITEMS.length - 1 : deskCustomizerIndex - 1)].id]?.asset}
+                      alt=""
+                      aria-hidden="true"
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'contain',
+                        opacity: 0.55,
+                      }}
+                    />
+                  </div>
+
+                  <button
+                    onClick={() => setDeskCustomizerIndex((prev) => (prev === 0 ? DESK_CUSTOMIZER_ITEMS.length - 1 : prev - 1))}
+                    style={{
+                      position: 'absolute',
+                      left: isDesktop ? 18 : 6,
+                      width: isDesktop ? 66 : 48,
+                      height: isDesktop ? 66 : 48,
+                      backgroundColor: '#101010',
+                      border: '1.5px solid #ABD49E',
+                      borderRadius: '50%',
+                      fontSize: isDesktop ? 34 : 24,
+                      color: '#ABD49E',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      zIndex: 5,
+                    }}
+                  >
+                    ◀
+                  </button>
+
+                  <div
+                    style={{
+                      backgroundColor: 'transparent',
+                      border: 'none',
+                      padding: isDesktop ? '8px 12px' : '7px 10px',
+                      fontSize: isDesktop ? 14 : 12,
+                      fontFamily: 'monospace',
+                      color: '#ABD49E',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.14em',
+                    }}
+                  >
+                    {currentCustomizerItem.label.toUpperCase()}
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 0, border: 'none' }}>
+                    <div
+                      style={{
+                        flex: 1,
+                        backgroundColor: 'transparent',
+                        borderRight: 'none',
+                        padding: isDesktop ? '8px 12px' : '7px 10px',
+                        fontSize: isDesktop ? 13 : 11,
+                        fontFamily: 'monospace',
+                        color: '#ABD49E',
+                        textTransform: 'uppercase',
+                      }}
+                    >
+                      {isOwnedCustomizerItem ? 'OWNED' : currentCustomizerItem.price}
+                    </div>
+                    <div
+                      style={{
+                        flex: 1,
+                        backgroundColor: 'transparent',
+                        padding: isDesktop ? '8px 12px' : '7px 10px',
+                        fontSize: isDesktop ? 13 : 11,
+                        fontFamily: 'monospace',
+                        color: '#ABD49E',
+                        textTransform: 'uppercase',
+                      }}
+                    >
+                      VIRTUAL ITEM
+                    </div>
+                  </div>
+
+                  <div style={{ height: isDesktop ? 22 : 14 }}></div>
+
+                  <button
+                    style={{
+                      backgroundColor: 'transparent',
+                      border: '1px solid #ABD49E',
+                      padding: isDesktop ? '8px 14px' : '8px 10px',
+                      fontSize: isDesktop ? 13 : 11,
+                      fontFamily: 'monospace',
+                      color: '#ABD49E',
+                      textTransform: 'uppercase',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      width: '100%',
+                    }}
+                    onClick={() => {
+                      if (isOwnedCustomizerItem) {
+                        handleAddDeskItem(currentCustomizerItem.id);
+                      } else {
+                        handlePurchaseDeskItem(currentCustomizerItem.id);
+                      }
+                    }}
+                  >
+                    <span>
+                      {isOwnedCustomizerItem
+                        ? (isEquippedCustomizerItem ? 'ON BASE' : 'EQUIP BASE')
+                        : 'PURCHASE ITEM'}
+                    </span>
+                    <span>›</span>
+                  </button>
+                </div>
+
+                <div
+                  style={{
+                    position: 'absolute',
+                    right: isDesktop ? 42 : 18,
+                    top: isDesktop ? 420 : 304,
+                    width: isDesktop ? 292 : 'calc(100% - 36px)',
+                    zIndex: 6,
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div style={{ display: 'grid', gap: 0 }}>
+                    <div
+                      style={{
+                        backgroundColor: '#101010',
+                        border: '1px solid #ABD49E',
+                        padding: isDesktop ? '8px 12px' : '7px 10px',
+                        fontSize: isDesktop ? 14 : 12,
+                        fontFamily: 'monospace',
+                        color: '#ABD49E',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.14em',
+                      }}
+                    >
+                      {currentCustomizerItem.label.toUpperCase()}
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 0, border: 'none' }}>
+                      <div
+                        style={{
+                          flex: 1,
+                          backgroundColor: 'transparent',
+                          borderRight: 'none',
+                          padding: isDesktop ? '8px 12px' : '7px 10px',
+                          fontSize: isDesktop ? 13 : 11,
+                          fontFamily: 'monospace',
+                          color: '#ABD49E',
+                          textTransform: 'uppercase',
+                        }}
+                      >
+                        {isOwnedCustomizerItem ? 'OWNED' : currentCustomizerItem.price}
+                      </div>
+                      <div
+                        style={{
+                          flex: 1,
+                          backgroundColor: 'transparent',
+                          padding: isDesktop ? '8px 12px' : '7px 10px',
+                          fontSize: isDesktop ? 13 : 11,
+                          fontFamily: 'monospace',
+                          color: '#ABD49E',
+                          textTransform: 'uppercase',
+                        }}
+                      >
+                        VIRTUAL ITEM
+                      </div>
+                    </div>
+
+                    <div style={{ height: isDesktop ? 22 : 14 }}></div>
+
+                    <button
+                      style={{
+                        backgroundColor: 'transparent',
+                        border: '1px solid #ABD49E',
+                        padding: isDesktop ? '8px 14px' : '8px 10px',
+                        fontSize: isDesktop ? 13 : 11,
+                        fontFamily: 'monospace',
+                        color: '#ABD49E',
+                        textTransform: 'uppercase',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        width: '100%',
+                      }}
+                      onClick={() => {
+                        if (isOwnedCustomizerItem) {
+                          handleAddDeskItem(currentCustomizerItem.id);
+                        } else {
+                          handlePurchaseDeskItem(currentCustomizerItem.id);
+                        }
+                      }}
+                    >
+                      <span>
+                        {isOwnedCustomizerItem
+                          ? (isEquippedCustomizerItem ? 'ON BASE' : 'EQUIP BASE')
+                          : 'PURCHASE ITEM'}
+                      </span>
+                      <span>›</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    position: 'absolute',
+                    left: '50%',
+                    bottom: isDesktop ? 74 : 26,
+                    transform: 'translateX(-50%)',
+                    background: 'rgba(16,16,16,0.94)',
+                    border: '1px solid #ABD49E',
+                    padding: isDesktop ? '10px 16px' : '8px 10px',
+                    width: isDesktop ? 620 : '82%',
+                    textAlign: 'center',
+                    color: '#ABD49E',
+                    fontFamily: 'monospace',
+                    fontSize: isDesktop ? 10 : 9,
+                    lineHeight: 1.35,
+                    letterSpacing: '0.12em',
+                    textTransform: 'uppercase',
+                    zIndex: 6,
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  THIS IS YOUR BASE CUSTOMIZER.YOU CAN ADD ITEMS YOU
+                  OWN TO YOUR BASE BY TAPPING ON THE &quot;EQUIP BASE&quot; BUTTON
+                </div>
+              </div>
+            )}
+*/
+function IconVolume({ color = '#101010' }) {
+  return (
+    <svg width="19" height="17" viewBox="0 0 19 17" fill="none">
+      <path d="M11.5 4C13.2 5.5 14 7 14 8.5C14 10 13.2 11.5 11.5 13" stroke={color} strokeWidth="1.5" strokeLinecap="round"/>
+    </svg>
+  );
+}
 function IconBack() {
   return (
     <svg width="16" height="13" viewBox="0 0 16 13" fill="none">
@@ -42,64 +668,6 @@ function IconHome() {
   return (
     <svg width="22" height="20" viewBox="0 0 22 20" fill="none">
       <path d="M1 9L11 1L21 9V19H15V13H7V19H1V9Z" stroke="#ABD49E" strokeWidth="1.5" strokeLinejoin="miter"/>
-    </svg>
-  );
-}
-function IconTicket() {
-  return (
-    <svg width="24" height="18" viewBox="0 0 24 18" fill="none">
-      <rect x="1" y="1" width="22" height="16" rx="1" stroke="#ABD49E" strokeWidth="1.5"/>
-      <circle cx="12" cy="9" r="2.5" stroke="#ABD49E" strokeWidth="1.2"/>
-    </svg>
-  );
-}
-function IconStore() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
-      <path d="M1 9H21V21H1V9Z" stroke="#ABD49E" strokeWidth="1.5"/>
-      <path d="M1 9L4 2H18L21 9" stroke="#ABD49E" strokeWidth="1.5" strokeLinejoin="miter"/>
-      <rect x="8" y="14" width="6" height="7" stroke="#ABD49E" strokeWidth="1.2"/>
-    </svg>
-  );
-}
-function IconQR() {
-  return (
-    <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
-      <rect x="2" y="2" width="9" height="9" stroke="#ABD49E" strokeWidth="1.5"/>
-      <rect x="5.5" y="5.5" width="2" height="2" fill="#ABD49E"/>
-      <rect x="15" y="2" width="9" height="9" stroke="#ABD49E" strokeWidth="1.5"/>
-      <rect x="18.5" y="5.5" width="2" height="2" fill="#ABD49E"/>
-      <rect x="2" y="15" width="9" height="9" stroke="#ABD49E" strokeWidth="1.5"/>
-      <rect x="5.5" y="18.5" width="2" height="2" fill="#ABD49E"/>
-      <rect x="15" y="15" width="3" height="3" fill="#ABD49E"/>
-      <rect x="20" y="15" width="3" height="3" fill="#ABD49E"/>
-      <rect x="15" y="20" width="3" height="3" fill="#ABD49E"/>
-      <rect x="20" y="20" width="3" height="3" fill="#ABD49E"/>
-    </svg>
-  );
-}
-function IconSmiley() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
-      <rect x="1" y="1" width="20" height="20" stroke="#ABD49E" strokeWidth="1.5"/>
-      <circle cx="8" cy="9" r="1.5" fill="#ABD49E"/>
-      <circle cx="14" cy="9" r="1.5" fill="#ABD49E"/>
-      <path d="M7 13.5C7.8 15.8 14.2 15.8 15 13.5" stroke="#ABD49E" strokeWidth="1.5" strokeLinecap="round"/>
-    </svg>
-  );
-}
-function IconSend() {
-  return (
-    <svg width="20" height="14" viewBox="0 0 20 14" fill="none">
-      <path d="M0 7H18M12 1L18 7L12 13" stroke="#ABD49E" strokeWidth="1.5" strokeLinecap="square"/>
-    </svg>
-  );
-}
-function IconVolume({ color = '#101010' }) {
-  return (
-    <svg width="19" height="17" viewBox="0 0 19 17" fill="none">
-      <path d="M8 1L4 5H1V12H4L8 16V1Z" fill={color}/>
-      <path d="M11.5 4C13.2 5.5 14 7 14 8.5C14 10 13.2 11.5 11.5 13" stroke={color} strokeWidth="1.5" strokeLinecap="round"/>
     </svg>
   );
 }
@@ -128,28 +696,1491 @@ function IconChevron({ up = false }) {
   );
 }
 
-// ─── Status Bar ────────────────────────────────────────────────────────────────
-function StatusBar() {
+// ─── Dream Desk assets ─────────────────────────────────────────────────────────
+const DD = '/Frames/User-base/USER%20BASE/Dream%20Desk%20assets';
+const DESK = {
+  TABLE:     `${DD}/Table.svg`,
+  CHAIR:     `${DD}/Chair.svg`,
+  COMPUTER:  `${DD}/Computer.svg`,
+  JOURNAL:   `${DD}/Journal%202.svg`,
+  RADIO:     `${DD}/Radio.svg`,
+  PORTFOLIO: `${DD}/Portfolio.svg`,
+  SLUMBOOK:  `${DD}/Slumbook.svg`,
+  BOOKPILE:  `${DD}/Book%20Pile.svg`,
+  BOOK2:     `${DD}/Book-2.svg`,
+  BOXES:     `${DD}/Group%20of%20Boxes.svg`,
+  MAILBOX:   `${DD}/Mailbox.svg`,
+};
+
+const DREAM_DESK_ITEMS = {
+  JOURNAL: {
+    label: 'JOURNAL',
+    asset: DESK.JOURNAL,
+    style: { height: 80, top: 28, left: 110, zIndex: 4 },
+    drawerKey: 'journal',
+  },
+  RADIO: {
+    label: 'RADIO',
+    asset: DESK.RADIO,
+    style: { height: 30, bottom: 44, left: 40, zIndex: 4, transform: 'rotate(-8deg)' },
+    drawerKey: 'radio',
+  },
+  PORTFOLIO: {
+    label: 'PORTFOLIO',
+    asset: DESK.PORTFOLIO,
+    style: { height: 92, top: 18, left: 12, zIndex: 3, transform: 'rotate(-8deg)' },
+    drawerKey: 'portfolio',
+  },
+  'SLUM BOOK': {
+    label: 'SLUM BOOK',
+    asset: DESK.SLUMBOOK,
+    style: { height: 78, top: 36, right: 82, zIndex: 4, transform: 'rotate(8deg)' },
+    drawerKey: 'journal',
+  },
+  'BOOK BOX': {
+    label: 'BOOK BOX',
+    asset: DESK.BOXES,
+    style: { width: 90, bottom: 26, right: -6, zIndex: 1 },
+    drawerKey: null,
+  },
+  MAILBOX: {
+    label: 'MAILBOX',
+    asset: DESK.MAILBOX,
+    style: { width: 72, bottom: 34, left: -2, zIndex: 2 },
+    drawerKey: null,
+  },
+  NOTEBOOK: {
+    label: 'NOTEBOOK',
+    asset: DESK.BOOK2,
+    style: { width: 78, top: 70, left: 78, zIndex: 4, transform: 'rotate(-12deg)' },
+    drawerKey: 'documents',
+  },
+};
+
+const DEFAULT_DESK_LAYOUT = [
+  { id: 'JOURNAL', x: 110, y: 28, zIndex: 4 },
+  { id: 'RADIO', x: 40, y: 146, zIndex: 4 },
+  { id: 'PORTFOLIO', x: 12, y: 18, zIndex: 3 },
+  { id: 'SLUM BOOK', x: 208, y: 36, zIndex: 4 },
+];
+
+const DESK_CUSTOMIZER_ITEMS = [
+  { id: 'JOURNAL', label: 'JOURNAL', price: 'DEFAULT' },
+  { id: 'RADIO', label: 'RADIO', price: 'DEFAULT' },
+  { id: 'PORTFOLIO', label: 'PORTFOLIO', price: 'DEFAULT' },
+  { id: 'SLUM BOOK', label: 'SLUM BOOK', price: 'DEFAULT' },
+  { id: 'NOTEBOOK', label: 'NOTEBOOK', price: '90 DT' },
+  { id: 'BOOK BOX', label: 'BOOK BOX', price: '120 DT' },
+  { id: 'MAILBOX', label: 'MAILBOX', price: '180 DT' },
+];
+
+// ─── Map Background — 3x3 around user, exact dreaming generation ─────────────
+// Hardcoded behavior: render the same procedural world rules as dreaming.js,
+// then show only the 3x3 neighborhood around the user so the desk reads as
+// replacing the user icon cell in the center.
+const ZOOM_FACTOR = 4.2; // one 77px grid cell becomes ~323px
+
+function MapBackground({ cw, ch, username }) {
+  const userGridPos = useMemo(() => {
+    return resolveUserGridPosition(username);
+  }, [username]);
+
+  // Same bounds math as dreaming.js so local elements match 1:1.
+  const mapBounds = useMemo(() => {
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+
+    MAP_ENTITIES.forEach((entity) => {
+      const sizing = getEntitySizing(entity.type);
+      minX = Math.min(minX, entity.gridX);
+      maxX = Math.max(maxX, entity.gridX + sizing.totalSpace - 1);
+      minY = Math.min(minY, entity.gridY);
+      maxY = Math.max(maxY, entity.gridY + sizing.totalSpace - 1);
+    });
+
+    const buffer = 8;
+    const mnX = Math.floor(minX - buffer);
+    const mxX = Math.floor(maxX + buffer);
+    const mnY = Math.floor(minY - buffer);
+    const mxY = Math.floor(maxY + buffer);
+    const rangeX = mxX - mnX;
+    const rangeY = mxY - mnY;
+    const maxRange = Math.max(rangeX, rangeY);
+    const minCoord = Math.min(mnX, mnY);
+    const maxCoord = minCoord + maxRange;
+
+    return {
+      minGridCoord: minCoord,
+      maxGridCoord: maxCoord,
+      mapSize: maxRange * GRID_SIZE,
+      gridOffset: -minCoord * GRID_SIZE,
+    };
+  }, []);
+
+  const naturalComponents = useMemo(() => {
+    return generateMapElements(
+      mapBounds.minGridCoord,
+      mapBounds.maxGridCoord,
+      mapBounds.minGridCoord,
+      mapBounds.maxGridCoord,
+      MAP_ENTITIES
+    );
+  }, [mapBounds]);
+
+  const elements = useMemo(() => {
+    const zoomedGrid = GRID_SIZE * ZOOM_FACTOR;
+    const userCellOriginX = (cw - zoomedGrid) / 2;
+    const userCellOriginY = (ch - zoomedGrid) / 2;
+
+    return naturalComponents.map((comp) => {
+      const dx = comp.gridX - userGridPos.gridX;
+      const dy = comp.gridY - userGridPos.gridY;
+      const px = userCellOriginX + dx * zoomedGrid;
+      const py = userCellOriginY + dy * zoomedGrid;
+      let size;
+      if (comp.type === 'big-tree') size = zoomedGrid * 1.5;
+      else if (comp.type === 'small-tree') size = zoomedGrid * 0.7;
+      else if (comp.type === 'palm') size = zoomedGrid * 0.8;
+      else if (comp.type === 'small-tree-extra') size = zoomedGrid * 0.5;
+      else size = zoomedGrid * 0.5;
+      return { ...comp, px, py, size };
+    }).filter((comp) => {
+      const half = comp.size / 2;
+      return !(comp.px + half < 0 || comp.px - half > cw || comp.py + half < 0 || comp.py - half > ch);
+    });
+  }, [naturalComponents, cw, ch, userGridPos]);
+
+  const zoomedGrid = GRID_SIZE * ZOOM_FACTOR;
+  const userCellOriginX = (cw - zoomedGrid) / 2;
+  const userCellOriginY = (ch - zoomedGrid) / 2;
+
   return (
-    <div style={{ height: 44, background: '#151413', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingInline: 16 }}>
-      <span style={{ fontFamily: 'monospace', fontSize: 12, color: '#E3E3E3' }}>9:41</span>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <svg width="17" height="12" viewBox="0 0 17 12" fill="#E3E3E3">
-          <rect x="0" y="8" width="3" height="4"/><rect x="4.5" y="5" width="3" height="7"/>
-          <rect x="9" y="2" width="3" height="10"/><rect x="13.5" y="0" width="3" height="12"/>
-        </svg>
-        <svg width="16" height="12" viewBox="0 0 16 12" fill="none">
-          <circle cx="8" cy="11" r="1.2" fill="#E3E3E3"/>
-          <path d="M5.5 8.5C6.3 7.7 7.1 7.3 8 7.3C8.9 7.3 9.7 7.7 10.5 8.5" stroke="#E3E3E3" strokeWidth="1.2" strokeLinecap="round"/>
-          <path d="M3 6C4.5 4.5 6.2 3.7 8 3.7C9.8 3.7 11.5 4.5 13 6" stroke="#E3E3E3" strokeWidth="1.2" strokeLinecap="round"/>
-          <path d="M0.5 3.5C2.8 1.3 5.3 0 8 0C10.7 0 13.2 1.3 15.5 3.5" stroke="#E3E3E3" strokeWidth="1.2" strokeLinecap="round"/>
-        </svg>
-        <div style={{ display: 'flex', alignItems: 'center' }}>
-          <div style={{ width: 18, height: 9, border: '1.4px solid #E3E3E3', borderRadius: 2, padding: 1 }}>
-            <div style={{ width: '75%', height: '100%', background: '#E3E3E3', borderRadius: 1 }}/>
-          </div>
-          <div style={{ width: 2, height: 5, background: '#E3E3E3', marginLeft: 1, borderRadius: 1 }}/>
+    <div aria-hidden="true" style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none' }}>
+      <div style={{
+        position: 'absolute', inset: 0,
+        backgroundImage: [
+          'linear-gradient(to right, rgba(255, 255, 255, 0.5) 1px, transparent 1px)',
+          'linear-gradient(to bottom, rgba(255, 255, 255, 0.5) 1px, transparent 1px)',
+        ].join(', '),
+        backgroundSize: `${zoomedGrid}px ${zoomedGrid}px`,
+        backgroundPosition: `${userCellOriginX}px ${userCellOriginY}px`,
+        pointerEvents: 'none',
+        zIndex: 1,
+      }}/>
+
+      {elements.map((comp) => (
+        <img
+          key={comp.id}
+          src={getImagePath(comp)}
+          alt=""
+          style={{
+            position: 'absolute',
+            left: comp.px,
+            top: comp.py,
+            width: comp.size,
+            height: comp.size,
+            transform: 'translate(-50%, -50%)',
+            zIndex: comp.type.includes('tree') || comp.type === 'palm' || comp.type === 'big-tree' ? 6 : 5,
+            objectFit: 'contain',
+            filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.85))',
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+// ─── Desk Scene ────────────────────────────────────────────────────────────────
+function DeskScene({
+  deskItems = [],
+  onDeskClick,
+  onOpenCustomizer,
+  onOpenKura,
+  onInteractItem,
+  onDragStartItem,
+  deskSurfaceRef,
+  shouldSuppressItemClick,
+  desktop = false,
+}) {
+
+  return (
+    <div
+      ref={deskSurfaceRef}
+      onClick={onDeskClick}
+      style={{ position: 'relative', width: 310, height: 255, cursor: onDeskClick ? 'pointer' : 'default' }}
+    >
+      <img src={DESK.TABLE} alt="" aria-hidden="true" style={{
+        position: 'absolute', width: 300, top: 0, right: 5,
+        zIndex: 2, pointerEvents: 'none',
+      }}/>
+      <img src={DESK.COMPUTER} alt="" aria-hidden="true" style={{
+        position: 'absolute', height: 112, width: 'auto', top: 0, right: 10,
+        zIndex: 3, pointerEvents: 'none',
+      }}/>
+      <img src={DESK.CHAIR} alt="" aria-hidden="true" style={{
+        position: 'absolute', width: 88, top: 100, left: 128,
+        zIndex: 1, pointerEvents: 'none',
+        transform: 'rotate(-12deg)', transformOrigin: 'center center',
+      }}/>
+
+      {deskItems.map((item) => {
+        const config = DREAM_DESK_ITEMS[item.id];
+        if (!config) return null;
+
+        const width = config.style.width;
+        const height = config.style.height;
+
+        return (
+          <button
+            key={item.id}
+            type="button"
+            aria-label={`Open ${config.label}`}
+            onMouseDown={(e) => onDragStartItem?.(e, item.id)}
+            onTouchStart={(e) => onDragStartItem?.(e, item.id)}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (shouldSuppressItemClick?.()) return;
+              onInteractItem?.(item.id);
+            }}
+            style={{
+              position: 'absolute',
+              left: `${item.x}px`,
+              top: `${item.y}px`,
+              width: width ? `${width}px` : 'auto',
+              height: height ? `${height}px` : 'auto',
+              background: 'transparent',
+              border: 'none',
+              padding: 0,
+              margin: 0,
+              zIndex: item.zIndex ?? config.style.zIndex,
+              transform: config.style.transform || 'none',
+              transformOrigin: 'top left',
+              cursor: 'grab',
+            }}
+          >
+            <img
+              src={config.asset}
+              alt=""
+              aria-hidden="true"
+              style={{
+                width: width ? `${width}px` : 'auto',
+                height: height ? `${height}px` : 'auto',
+                display: 'block',
+                pointerEvents: 'none',
+              }}
+            />
+          </button>
+        );
+      })}
+
+      <button
+        type="button"
+        aria-label="Open Dream Desk customizer"
+        onClick={(e) => {
+          e.stopPropagation();
+          onOpenCustomizer?.();
+        }}
+        style={{
+          position: 'absolute',
+          right: desktop ? -550 : 6,
+          bottom: desktop ? 140 : 58,
+          width: desktop ? 52 : 44,
+          height: desktop ? 52 : 44,
+          background: '#101010',
+          border: '1.5px solid #ABD49E',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: '#ABD49E',
+          fontFamily: 'monospace',
+          fontSize: desktop ? 22 : 18,
+          lineHeight: 1,
+          cursor: 'pointer',
+          zIndex: 8,
+          boxShadow: '0 10px 24px rgba(0,0,0,0.35)',
+        }}
+      >
+        +
+      </button>
+
+      <button
+        type="button"
+        aria-label="Open Kura"
+        onClick={(e) => {
+          e.stopPropagation();
+          onOpenKura?.();
+        }}
+        style={{
+          position: 'absolute',
+          right: desktop ? -550 : 6,
+          bottom: desktop ? 78 : 6,
+          width: desktop ? 52 : 44,
+          height: desktop ? 52 : 44,
+          background: '#101010',
+          border: '1.5px solid #ABD49E',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: '#ABD49E',
+          fontFamily: 'monospace',
+          fontSize: desktop ? 9 : 8,
+          letterSpacing: '0.08em',
+          cursor: 'pointer',
+          zIndex: 8,
+          boxShadow: '0 10px 24px rgba(0,0,0,0.35)',
+        }}
+      >
+        KURA
+      </button>
+    </div>
+  );
+}
+
+// ─── Dream Desk Popup ──────────────────────────────────────────────────────────
+function DreamDeskPopup({ menuItems, activeDeskItem, onSelectItem, onClose, style = {}, desktop = false }) {
+  return (
+    <div style={{ width: desktop ? 238 : 135, ...style }}>
+      <div style={{
+        height: desktop ? 46 : 32, display: 'flex', alignItems: 'center',
+        justifyContent: 'space-between', paddingInline: desktop ? 16 : 10,
+        background: '#ABD49E',
+        border: desktop ? '2px solid #101010' : 'none',
+      }}>
+        <span style={{ fontFamily: 'monospace', fontSize: desktop ? 13 : 10, fontWeight: 700, color: '#101010', letterSpacing: '0.08em' }}>DREAM DESK</span>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#101010', fontSize: desktop ? 18 : 12, cursor: 'pointer', padding: 0 }}>×</button>
+      </div>
+      {menuItems.map(({ item, h }) => (
+        <button
+          key={item}
+          onClick={() => { onSelectItem?.(item); onClose(); }}
+          style={{
+            display: 'block', width: '100%', height: h,
+            marginTop: desktop ? 8 : 5,
+            background: activeDeskItem === item ? '#ABD49E' : '#101010',
+            border: desktop ? '2px solid #101010' : '1px solid rgba(171,212,158,0.18)',
+            color: activeDeskItem === item ? '#101010' : '#ABD49E', fontFamily: 'monospace', fontSize: desktop ? 12 : 10,
+            letterSpacing: '0.08em', textTransform: 'uppercase',
+            textAlign: 'left', paddingInline: desktop ? 16 : 10, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          }}
+        >
+          <span>{item}</span>
+          <span style={{ opacity: 0.85 }}>›</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ─── Home Scene (frozen canvas with jungle + desk) ────────────────────────────
+function HomeScene({ activeDeskItem, setActiveDeskItem, username, onOpenKura }) {
+  const [deskPopupOpen, setDeskPopupOpen] = useState(false);
+  const [deskCustomizerOpen, setDeskCustomizerOpen] = useState(false);
+  const [deskDrawerView, setDeskDrawerView] = useState(null);
+  const [deskItems, setDeskItems] = useState(DEFAULT_DESK_LAYOUT);
+  const [ownedDeskItems, setOwnedDeskItems] = useState(['JOURNAL', 'RADIO', 'PORTFOLIO', 'SLUM BOOK']);
+  const [deskCustomizerIndex, setDeskCustomizerIndex] = useState(0);
+  const [draggedDeskItemId, setDraggedDeskItemId] = useState(null);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const [dragItemSize, setDragItemSize] = useState({ width: 56, height: 56 });
+  const [isDraggingDeskItem, setIsDraggingDeskItem] = useState(false);
+  const containerRef = useRef(null);
+  const deskSurfaceRef = useRef(null);
+  const dragStartPointRef = useRef({ x: 0, y: 0 });
+  const dragMovedRef = useRef(false);
+  const suppressClickUntilRef = useRef(0);
+  const [frozen, setFrozen] = useState(null);
+  const zoomedGrid = GRID_SIZE * ZOOM_FACTOR;
+  const isDesktop = frozen ? frozen.w >= 1024 : false;
+
+  const menuItems = useMemo(() => {
+    return deskItems
+      .filter((item) => Boolean(DREAM_DESK_ITEMS[item.id]?.drawerKey))
+      .map((item) => ({ item: item.id, h: isDesktop ? 46 : 38 }));
+  }, [deskItems, isDesktop]);
+
+  const currentCustomizerItem = DESK_CUSTOMIZER_ITEMS[deskCustomizerIndex] || DESK_CUSTOMIZER_ITEMS[0];
+  const isOwnedCustomizerItem = ownedDeskItems.includes(currentCustomizerItem.id);
+  const isEquippedCustomizerItem = deskItems.some((item) => item.id === currentCustomizerItem.id);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (el && !frozen) setFrozen({ w: el.offsetWidth, h: el.offsetHeight });
+  }, []);
+
+  const handleSelectDeskItem = (itemId) => {
+    setActiveDeskItem(itemId);
+    const drawerKey = DREAM_DESK_ITEMS[itemId]?.drawerKey;
+    if (drawerKey) setDeskDrawerView(drawerKey);
+  };
+
+  const handleAddDeskItem = (itemId) => {
+    if (deskItems.some((item) => item.id === itemId)) return;
+    const config = DREAM_DESK_ITEMS[itemId];
+    if (!config) return;
+
+    setDeskItems((items) => [
+      ...items,
+      {
+        id: itemId,
+        x: config.style.left ?? 150,
+        y: config.style.top ?? 110,
+        zIndex: config.style.zIndex,
+      },
+    ]);
+    setActiveDeskItem(itemId);
+  };
+
+  const handlePurchaseDeskItem = (itemId) => {
+    setOwnedDeskItems((items) => (items.includes(itemId) ? items : [...items, itemId]));
+  };
+
+  const handleDragStartItem = (event, itemId) => {
+    const point = 'touches' in event ? event.touches[0] : event;
+    const targetRect = event.currentTarget.getBoundingClientRect();
+    setDraggedDeskItemId(itemId);
+    setIsDraggingDeskItem(false);
+    dragMovedRef.current = false;
+    dragStartPointRef.current = { x: point.clientX, y: point.clientY };
+    setDragOffset({
+      x: point.clientX - targetRect.left,
+      y: point.clientY - targetRect.top,
+    });
+    setDragItemSize({ width: targetRect.width, height: targetRect.height });
+  };
+
+  const shouldSuppressItemClick = () => {
+    return Date.now() < suppressClickUntilRef.current || dragMovedRef.current;
+  };
+
+  useEffect(() => {
+    if (!deskCustomizerOpen) return;
+    const fromActiveIndex = DESK_CUSTOMIZER_ITEMS.findIndex((item) => item.id === activeDeskItem);
+    if (fromActiveIndex >= 0) setDeskCustomizerIndex(fromActiveIndex);
+  }, [deskCustomizerOpen, activeDeskItem]);
+
+  useEffect(() => {
+    if (!draggedDeskItemId) return;
+
+    const updatePosition = (clientX, clientY) => {
+      const deskSurface = deskSurfaceRef.current;
+      if (!deskSurface) return;
+
+      const rect = deskSurface.getBoundingClientRect();
+      const deltaX = clientX - dragStartPointRef.current.x;
+      const deltaY = clientY - dragStartPointRef.current.y;
+      const movement = Math.hypot(deltaX, deltaY);
+
+      if (movement > 6) {
+        dragMovedRef.current = true;
+        setIsDraggingDeskItem(true);
+      }
+      if (!dragMovedRef.current) return;
+
+      const nextX = Math.max(0, Math.min(rect.width - dragItemSize.width, clientX - rect.left - dragOffset.x));
+      const nextY = Math.max(0, Math.min(rect.height - dragItemSize.height, clientY - rect.top - dragOffset.y));
+
+      setDeskItems((items) => items.map((item) => (
+        item.id === draggedDeskItemId ? { ...item, x: nextX, y: nextY } : item
+      )));
+    };
+
+    const handleMove = (event) => {
+      const point = 'touches' in event ? event.touches[0] : event;
+      updatePosition(point.clientX, point.clientY);
+      if ('preventDefault' in event) event.preventDefault();
+    };
+
+    const handleEnd = () => {
+      if (dragMovedRef.current) suppressClickUntilRef.current = Date.now() + 200;
+      setTimeout(() => {
+        setDraggedDeskItemId(null);
+        setIsDraggingDeskItem(false);
+        dragMovedRef.current = false;
+      }, 0);
+    };
+
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleEnd);
+    window.addEventListener('touchmove', handleMove, { passive: false });
+    window.addEventListener('touchend', handleEnd);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleEnd);
+      window.removeEventListener('touchmove', handleMove);
+      window.removeEventListener('touchend', handleEnd);
+    };
+  }, [draggedDeskItemId, dragOffset, dragItemSize]);
+
+  const renderDrawerContent = (drawerKey) => {
+    if (drawerKey === 'journal') {
+      return (
+        <div style={{ padding: 16 }}>
+          <textarea
+            style={{ width: '100%', minHeight: 220, background: '#101010', border: '1px solid #ABD49E', color: '#ABD49E', padding: 12, resize: 'vertical', fontFamily: 'inherit' }}
+            placeholder="Write your dreams, thoughts, and ideas here..."
+          />
+          <button style={{ marginTop: 12, width: '100%', height: 42, background: '#ABD49E', color: '#101010', border: 'none', fontFamily: 'monospace', letterSpacing: '0.08em', cursor: 'pointer' }}>
+            SAVE ENTRY
+          </button>
         </div>
+      );
+    }
+
+    if (drawerKey === 'portfolio') {
+      return (
+        <div style={{ padding: 16, display: 'grid', gap: 10 }}>
+          <p style={{ color: '#ABD49E', fontSize: 13, lineHeight: 1.5 }}>Upload your work, projects, and achievements.</p>
+          <button style={{ width: '100%', height: 44, background: '#ABD49E', color: '#101010', border: 'none', fontFamily: 'monospace', letterSpacing: '0.08em', cursor: 'pointer' }}>+ UPLOAD FILE</button>
+          <button style={{ width: '100%', height: 44, background: '#ABD49E', color: '#101010', border: 'none', fontFamily: 'monospace', letterSpacing: '0.08em', cursor: 'pointer' }}>+ CREATE PROJECT</button>
+        </div>
+      );
+    }
+
+    if (drawerKey === 'radio') {
+      return (
+        <div style={{ padding: 16, display: 'grid', gap: 10 }}>
+          <p style={{ color: '#ABD49E', fontSize: 13, lineHeight: 1.5 }}>Tune into your favorite stations or play your music.</p>
+          {['LO-FI BEATS', 'CHILL VIBES', 'NATURE SOUNDS'].map((label) => (
+            <button key={label} style={{ width: '100%', height: 40, background: '#F4A261', color: '#101010', border: 'none', fontFamily: 'monospace', letterSpacing: '0.08em', cursor: 'pointer' }}>{label}</button>
+          ))}
+          <button style={{ width: '100%', height: 42, background: '#ABD49E', color: '#101010', border: 'none', fontFamily: 'monospace', letterSpacing: '0.08em', cursor: 'pointer' }}>+ ADD MUSIC</button>
+        </div>
+      );
+    }
+
+    if (drawerKey === 'documents') {
+      return (
+        <div style={{ padding: 16, display: 'grid', gap: 10 }}>
+          <p style={{ color: '#ABD49E', fontSize: 13, lineHeight: 1.5 }}>Manage your documents and notes.</p>
+          <button style={{ width: '100%', height: 42, background: '#ABD49E', color: '#101010', border: 'none', fontFamily: 'monospace', letterSpacing: '0.08em', cursor: 'pointer' }}>+ NEW DOCUMENT</button>
+          <div style={{ background: '#101010', border: '1px solid rgba(171,212,158,0.25)', color: '#ABD49E', padding: 12, fontSize: 12 }}>Untitled Document</div>
+        </div>
+      );
+    }
+
+    return (
+      <div style={{ padding: 16, color: '#ABD49E', fontSize: 13 }}>This item is decorative for now.</div>
+    );
+  };
+
+  return (
+    <div
+      ref={containerRef}
+      style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden', background: '#151413' }}
+    >
+      {frozen && (
+        <div
+          style={{
+            position: 'absolute',
+            left: '50%', top: '50%',
+            transform: 'translate(-50%, -50%)',
+            width: frozen.w, height: frozen.h,
+            overflow: 'hidden',
+          }}
+          onClick={() => {
+            setDeskPopupOpen(false);
+            setDeskCustomizerOpen(false);
+          }}
+        >
+          <div style={{ position: 'relative', width: frozen.w, height: frozen.h }}>
+            <MapBackground cw={frozen.w} ch={frozen.h} username={username} />
+
+            {/* Dream desk — locked to the exact center grid cell */}
+            <div
+              style={{
+                position: 'absolute',
+                left: '50%',
+                top: '50%',
+                transform: 'translate(-50%, -50%)',
+                zIndex: 4,
+                width: zoomedGrid,
+                height: zoomedGrid,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+              onClick={e => {
+                e.stopPropagation();
+                if (!isDraggingDeskItem) setDeskPopupOpen(true);
+              }}
+            >
+              <DeskScene
+                deskItems={deskItems}
+                activeDeskItem={activeDeskItem}
+                onDeskClick={() => {
+                  if (!isDraggingDeskItem) setDeskPopupOpen(true);
+                }}
+                onOpenCustomizer={() => {
+                  setDeskPopupOpen(false);
+                  setDeskCustomizerOpen(true);
+                }}
+                onOpenKura={onOpenKura}
+                onInteractItem={handleSelectDeskItem}
+                onDragStartItem={handleDragStartItem}
+                deskSurfaceRef={deskSurfaceRef}
+                shouldSuppressItemClick={shouldSuppressItemClick}
+                desktop={isDesktop}
+              />
+            </div>
+
+            {deskPopupOpen && (
+              <div
+                style={{
+                  position: 'absolute',
+                  left: isDesktop ? `calc(50% + 250px)` : `calc(50% + 170px)`,
+                  top: isDesktop ? `calc(50% - 130px)` : `calc(50% - 100px)`,
+                  zIndex: 20,
+                }}
+                onClick={e => e.stopPropagation()}
+              >
+                <DreamDeskPopup
+                  menuItems={menuItems}
+                  activeDeskItem={activeDeskItem}
+                  onSelectItem={handleSelectDeskItem}
+                  onClose={() => setDeskPopupOpen(false)}
+                  desktop={isDesktop}
+                />
+              </div>
+            )}
+
+            {deskCustomizerOpen && currentCustomizerItem && (
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  backgroundColor: '#101010',
+                  zIndex: 30,
+                  overflow: 'hidden',
+                }}
+                onClick={() => setDeskCustomizerOpen(false)}
+              >
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: isDesktop ? 34 : 20,
+                    left: isDesktop ? 44 : 24,
+                    width: isDesktop ? 52 : 40,
+                    height: isDesktop ? 52 : 40,
+                    borderRadius: '999px',
+                    border: '1.5px solid #ABD49E',
+                    background: '#101010',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#ABD49E',
+                    fontSize: isDesktop ? 18 : 16,
+                    lineHeight: 1,
+                    cursor: 'pointer',
+                    zIndex: 5,
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setDeskCustomizerOpen(false);
+                  }}
+                >
+                  ↩
+                </div>
+
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: isDesktop ? 30 : 18,
+                    right: isDesktop ? 34 : 20,
+                    display: 'flex',
+                    gap: isDesktop ? 10 : 8,
+                    alignItems: 'stretch',
+                    zIndex: 6,
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div
+                    style={{
+                      background: '#101010',
+                      border: '1px solid #ABD49E',
+                      padding: isDesktop ? '8px 16px' : '6px 10px',
+                      color: '#ABD49E',
+                      fontFamily: 'monospace',
+                      fontSize: isDesktop ? 16 : 11,
+                      letterSpacing: '0.14em',
+                      textTransform: 'uppercase',
+                      whiteSpace: 'nowrap',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    BASE CUSTOMIZER
+                  </div>
+                  <button
+                    type="button"
+                    style={{
+                      width: isDesktop ? 62 : 44,
+                      height: isDesktop ? 62 : 44,
+                      border: '1px solid #ABD49E',
+                      background: '#101010',
+                      color: '#ABD49E',
+                      fontSize: isDesktop ? 24 : 20,
+                      lineHeight: 1,
+                      cursor: 'pointer',
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDeskCustomizerOpen(false);
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+
+                <div
+                  style={{
+                    position: 'absolute',
+                      top: isDesktop ? 172 : 132,
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    width: isDesktop ? 'min(1280px, 92vw)' : '92vw',
+                      height: isDesktop ? 390 : 272,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 4,
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div
+                    style={{
+                      position: 'absolute',
+                      left: isDesktop ? 2 : 0,
+                      top: isDesktop ? 38 : 24,
+                      width: isDesktop ? 208 : 124,
+                      height: isDesktop ? 160 : 96,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      opacity: 0.9,
+                      zIndex: 1,
+                      pointerEvents: 'none',
+                    }}
+                  >
+                    <img
+                      src={DREAM_DESK_ITEMS[DESK_CUSTOMIZER_ITEMS[(deskCustomizerIndex === 0 ? DESK_CUSTOMIZER_ITEMS.length - 1 : deskCustomizerIndex - 1)].id]?.asset}
+                      alt=""
+                      aria-hidden="true"
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'contain',
+                        opacity: 0.55,
+                      }}
+                    />
+                  </div>
+
+                  <button
+                    onClick={() => setDeskCustomizerIndex((prev) => (prev === 0 ? DESK_CUSTOMIZER_ITEMS.length - 1 : prev - 1))}
+                    style={{
+                      position: 'absolute',
+                      left: isDesktop ? 18 : 6,
+                      width: isDesktop ? 66 : 48,
+                      height: isDesktop ? 66 : 48,
+                      backgroundColor: '#101010',
+                      border: '1.5px solid #ABD49E',
+                      borderRadius: '50%',
+                      fontSize: isDesktop ? 34 : 24,
+                      color: '#ABD49E',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      zIndex: 5,
+                    }}
+                  >
+                    ◀
+                  </button>
+
+                  <div
+                    style={{
+                      backgroundColor: 'transparent',
+                      width: isDesktop ? 520 : 330,
+                      height: isDesktop ? 260 : 160,
+                      padding: 0,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      zIndex: 4,
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: 0,
+                      }}
+                    >
+                      <img
+                        src={DREAM_DESK_ITEMS[currentCustomizerItem.id]?.asset}
+                        alt={currentCustomizerItem.label}
+                        style={{
+                          maxWidth: '100%',
+                          maxHeight: '100%',
+                          objectFit: 'contain',
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => setDeskCustomizerIndex((prev) => (prev === DESK_CUSTOMIZER_ITEMS.length - 1 ? 0 : prev + 1))}
+                    style={{
+                      position: 'absolute',
+                      right: isDesktop ? 18 : 6,
+                      width: isDesktop ? 66 : 48,
+                      height: isDesktop ? 66 : 48,
+                      backgroundColor: '#101010',
+                      border: '1.5px solid #ABD49E',
+                      borderRadius: '50%',
+                      fontSize: isDesktop ? 34 : 24,
+                      color: '#ABD49E',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      zIndex: 5,
+                    }}
+                  >
+                    ▶
+                  </button>
+
+                  <div
+                    style={{
+                      position: 'absolute',
+                      right: isDesktop ? 2 : 0,
+                      top: isDesktop ? 38 : 24,
+                      width: isDesktop ? 208 : 124,
+                      height: isDesktop ? 160 : 96,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      opacity: 0.9,
+                      zIndex: 1,
+                      pointerEvents: 'none',
+                    }}
+                  >
+                    <img
+                      src={DREAM_DESK_ITEMS[DESK_CUSTOMIZER_ITEMS[(deskCustomizerIndex === DESK_CUSTOMIZER_ITEMS.length - 1 ? 0 : deskCustomizerIndex + 1)].id]?.asset}
+                      alt=""
+                      aria-hidden="true"
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'contain',
+                        opacity: 0.55,
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    position: 'absolute',
+                    left: '50%',
+                    top: isDesktop ? 500 : 334,
+                    transform: isDesktop ? 'translateX(110px)' : 'translateX(8px)',
+                    width: isDesktop ? 292 : 'min(86vw, 320px)',
+                    zIndex: 6,
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div style={{ display: 'grid', gap: 0 }}>
+                    <div
+                      style={{
+                        backgroundColor: 'transparent',
+                        border: 'none',
+                        padding: isDesktop ? '8px 12px' : '7px 10px',
+                        fontSize: isDesktop ? 14 : 12,
+                        fontFamily: 'monospace',
+                        color: '#ABD49E',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.14em',
+                      }}
+                    >
+                      {currentCustomizerItem.label.toUpperCase()}
+                    </div>
+
+                    <div
+                      style={{
+                        display: 'flex',
+                        gap: 0,
+                        border: 'none',
+                      }}
+                    >
+                      <div
+                        style={{
+                          flex: 1,
+                          backgroundColor: 'transparent',
+                          borderRight: 'none',
+                          padding: isDesktop ? '8px 12px' : '7px 10px',
+                          fontSize: isDesktop ? 13 : 11,
+                          fontFamily: 'monospace',
+                          color: '#ABD49E',
+                          textTransform: 'uppercase',
+                        }}
+                      >
+                        {isOwnedCustomizerItem ? 'OWNED' : currentCustomizerItem.price}
+                      </div>
+                      <div
+                        style={{
+                          flex: 1,
+                          backgroundColor: 'transparent',
+                          padding: isDesktop ? '8px 12px' : '7px 10px',
+                          fontSize: isDesktop ? 13 : 11,
+                          fontFamily: 'monospace',
+                          color: '#ABD49E',
+                          textTransform: 'uppercase',
+                        }}
+                      >
+                        VIRTUAL ITEM
+                      </div>
+                    </div>
+
+                    <div style={{ height: isDesktop ? 22 : 14 }}></div>
+
+                    <button
+                      style={{
+                        backgroundColor: 'transparent',
+                        border: '1px solid #ABD49E',
+                        padding: isDesktop ? '8px 14px' : '8px 10px',
+                        fontSize: isDesktop ? 13 : 11,
+                        fontFamily: 'monospace',
+                        color: '#ABD49E',
+                        textTransform: 'uppercase',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        width: '100%',
+                      }}
+                      onClick={() => {
+                        if (isOwnedCustomizerItem) {
+                          handleAddDeskItem(currentCustomizerItem.id);
+                        } else {
+                          handlePurchaseDeskItem(currentCustomizerItem.id);
+                        }
+                      }}
+                    >
+                      <span>
+                        {isOwnedCustomizerItem
+                          ? (isEquippedCustomizerItem ? 'ON BASE' : 'EQUIP BASE')
+                          : 'PURCHASE ITEM'}
+                      </span>
+                      <span>›</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    position: 'absolute',
+                    left: '50%',
+                    bottom: isDesktop ? 120 : 26,
+                    transform: 'translateX(-50%)',
+                    background: 'rgba(16,16,16,0.94)',
+                    border: '1px solid #ABD49E',
+                    padding: isDesktop ? '10px 16px' : '8px 10px',
+                    width: isDesktop ? 620 : '82%',
+                    textAlign: 'center',
+                    color: '#ABD49E',
+                    fontFamily: 'monospace',
+                    fontSize: isDesktop ? 10 : 9,
+                    lineHeight: 1.35,
+                    letterSpacing: '0.12em',
+                    textTransform: 'uppercase',
+                    zIndex: 6,
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  THIS IS YOUR BASE CUSTOMIZER.YOU CAN ADD ITEMS YOU
+                  OWN TO YOUR BASE BY TAPPING ON THE &quot;EQUIP BASE&quot; BUTTON
+                </div>
+              </div>
+            )}
+            {deskDrawerView && (
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  background: 'rgba(16,16,16,0.72)',
+                  zIndex: 40,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: 18,
+                }}
+                onClick={() => setDeskDrawerView(null)}
+              >
+                <div
+                  style={{
+                    width: 'min(560px, 92vw)',
+                    maxHeight: '80vh',
+                    overflowY: 'auto',
+                    background: '#151413',
+                    border: '1.5px solid #ABD49E',
+                    boxShadow: '0 24px 80px rgba(0,0,0,0.45)',
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 18px', borderBottom: '1px solid rgba(171,212,158,0.25)', color: '#ABD49E', fontFamily: 'monospace', fontSize: 13, letterSpacing: '0.08em' }}>
+                    <span>{DREAM_DESK_ITEMS[activeDeskItem]?.label || 'DREAM DESK ITEM'}</span>
+                    <button onClick={() => setDeskDrawerView(null)} style={{ background: 'none', border: 'none', color: '#ABD49E', fontSize: 20, cursor: 'pointer' }}>×</button>
+                  </div>
+                  {renderDrawerContent(deskDrawerView)}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Kura Tab (AI Companion, from kura.js) ────────────────────────────────────
+function KuraTab() {
+  // Opening state comes from GET /api/kura/daily-state — Kura's per-user daily
+  // reading, generated server-side from this user's dream log, dojo XP, level and
+  // time of day (see original-backend/src/controllers/kura.js). Replaces a
+  // hardcoded three-message conversation that was the entire content here.
+  //
+  // Note: responding to a *typed* message is still local. There is no chat
+  // endpoint on the backend (only the daily state), so the reply below is a
+  // holding pattern, not a model call.
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState('');
+  const [resonance, setResonance] = useState(85);
+  const [kuraState, setKuraState] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/kura/daily-state', { credentials: 'include' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((state) => {
+        if (cancelled || !state) return;
+        setKuraState(state);
+        const opening = [];
+        if (state.message) opening.push({ id: 'kura-daily', message: state.message, time: 'Today', isKura: true });
+        if (state.nudge) opening.push({ id: 'kura-nudge', message: state.nudge, time: 'Today', isKura: true });
+        if (opening.length) setMessages(opening);
+      })
+      .catch(() => {
+        // Backend down — leave the thread empty rather than invent a reading.
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const handleSend = () => {
+    if (!input.trim()) return;
+    setMessages(prev => [...prev, { id: Date.now(), message: input, time: 'Now', isKura: false }]);
+    setInput('');
+    setTimeout(() => {
+      setMessages(prev => [...prev, {
+        id: Date.now() + 1,
+        message: "The jungle hears you. Let that thought take root and see what grows.",
+        time: 'Now',
+        isKura: true
+      }]);
+      setResonance(prev => Math.min(100, prev + 2));
+    }, 1500);
+  };
+
+  return (
+    <div className="flex flex-col h-full bg-secondary text-primary">
+      {/* Header */}
+      <div className="px-4 py-3 border-b border-primary/10 flex items-center justify-between flex-shrink-0">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-full bg-[#8B5CF6]/20 border border-[#8B5CF6] flex items-center justify-center">
+            <Sparkles size={16} className="text-[#8B5CF6]" />
+          </div>
+          <div>
+            <h1 className="text-xs font-bold tracking-wide">YOUR KURA</h1>
+            <p className="text-[7px] text-primary/40">AI Companion • {kuraState?.beast ? `${kuraState.beast} (${kuraState.resonance})` : `Resonance: ${resonance}%`}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-1">
+          <Heart size={12} className="text-red-400/60" />
+          <span className="text-[8px] text-primary/40">Bond: Lv.3</span>
+        </div>
+      </div>
+
+      {/* Resonance bar */}
+      <div className="px-4 py-1.5">
+        <div className="h-1 bg-primary/10 rounded-full overflow-hidden">
+          <div className="h-full bg-[#8B5CF6] transition-all duration-500 rounded-full"
+            style={{ width: `${resonance}%` }}
+          />
+        </div>
+      </div>
+
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+        {messages.map(msg => (
+          <div key={msg.id} className={`flex ${msg.isKura ? 'justify-start' : 'justify-end'}`}>
+            <div className={`max-w-[80%] p-2.5 ${
+              msg.isKura 
+                ? 'bg-primary/10 border border-primary/20' 
+                : 'bg-[#8B5CF6]/20 border border-[#8B5CF6]/30'
+            }`}>
+              <p className="text-[11px] leading-relaxed">{msg.message}</p>
+              <p className="text-[7px] text-primary/30 mt-1">{msg.time}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Input */}
+      <div className="px-4 py-2.5 border-t border-primary/10 flex-shrink-0">
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleSend()}
+            placeholder="Speak to Kura..."
+            className="flex-1 bg-transparent border border-primary/20 px-3 py-2 text-[11px] text-primary placeholder-primary/30 focus:outline-none focus:border-primary/40"
+          />
+          <button onClick={handleSend}
+            className="px-3 py-2 bg-[#8B5CF6] text-white text-[10px] font-bold hover:bg-[#7C3AED] transition-all"
+          >
+            <Send size={13} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Dreams Tab (Dream Journal, from dreamlog.js) ─────────────────────────────
+function DreamsTab({ ownerId }) {
+  const [showNew, setShowNew] = useState(false);
+  const [newDream, setNewDream] = useState({ title: '', content: '', mood: 'normal', tags: '' });
+  const [dreams, setDreams] = useState([]);
+  const [loadingDreams, setLoadingDreams] = useState(true);
+  const [savingDream, setSavingDream] = useState(false);
+
+  // Live journal. GET /api/dreamlog returns the viewer's own entries; when the
+  // route gate knows whose base this is, /api/dreamlog/public/:ownerId returns
+  // that owner's public entries instead. Replaces three MOCK_DREAMS.
+  useEffect(() => {
+    let cancelled = false;
+    const url = ownerId ? `/api/dreamlog/public/${ownerId}` : '/api/dreamlog';
+    fetch(url, { credentials: 'include' })
+      .then(async (res) => {
+        if (!res.ok) return [];
+        const body = await res.json();
+        if (Array.isArray(body)) return body;
+        return Array.isArray(body?.data) ? body.data : [];
+      })
+      .then((list) => {
+        if (cancelled) return;
+        setDreams(list.map((d) => ({
+          id: d._id,
+          title: d.title || 'Untitled dream',
+          date: d.createdAt ? String(d.createdAt).slice(0, 10) : '',
+          mood: d.mood || 'normal',
+          content: d.content || '',
+          tags: Array.isArray(d.tags) ? d.tags : [],
+        })));
+      })
+      .catch(() => { if (!cancelled) setDreams([]); })
+      .finally(() => { if (!cancelled) setLoadingDreams(false); });
+    return () => { cancelled = true; };
+  }, [ownerId]);
+
+  // POST /api/dreamlog — the entry is persisted, and only then shown. The mood
+  // chip is a local annotation: the DreamLog model stores content/tasks/privacy,
+  // not mood, so it is kept in the view model only.
+  const handleSave = async () => {
+    if (!newDream.title.trim() || savingDream) return;
+    setSavingDream(true);
+    try {
+      const res = await fetch('/api/dreamlog', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          title: newDream.title,
+          content: newDream.content,
+          isPrivate: false,
+        }),
+      });
+      if (!res.ok) return; // leave the form open so nothing is silently lost
+      const entry = await res.json();
+      setDreams((prev) => [{
+        id: entry._id,
+        title: entry.title || newDream.title,
+        date: entry.createdAt ? String(entry.createdAt).slice(0, 10) : '',
+        mood: newDream.mood,
+        content: entry.content || newDream.content,
+        tags: [],
+      }, ...prev]);
+      setShowNew(false);
+      setNewDream({ title: '', content: '', mood: 'normal', tags: '' });
+    } catch {
+      // Network failure — keep the draft on screen.
+    } finally {
+      setSavingDream(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col h-full bg-secondary text-primary overflow-y-auto">
+      {/* Header */}
+      <div className="px-4 py-3 border-b border-primary/10 flex items-center justify-between flex-shrink-0">
+        <div className="flex items-center gap-2">
+          <Moon size={15} className="text-[#8B5CF6]" />
+          <h1 className="text-xs font-bold tracking-[0.15em]">DREAM LOG</h1>
+        </div>
+        <button onClick={() => setShowNew(!showNew)}
+          className="flex items-center gap-1 text-[9px] font-bold text-[#8B5CF6] hover:text-[#7C3AED] transition-colors"
+        >
+          <Plus size={12} /> NEW
+        </button>
+      </div>
+
+      {/* New dream form */}
+      {showNew && (
+        <div className="px-4 py-3 border-b border-primary/10 bg-primary/5">
+          <div className="space-y-2.5">
+            <input type="text" placeholder="Dream title..." value={newDream.title}
+              onChange={e => setNewDream(prev => ({ ...prev, title: e.target.value }))}
+              className="w-full bg-transparent border border-primary/20 px-3 py-2 text-[11px] text-primary placeholder-primary/30 focus:outline-none focus:border-primary/40"
+            />
+            <textarea placeholder="Describe your dream..." value={newDream.content}
+              onChange={e => setNewDream(prev => ({ ...prev, content: e.target.value }))}
+              rows={3}
+              className="w-full bg-transparent border border-primary/20 px-3 py-2 text-[11px] text-primary placeholder-primary/30 focus:outline-none focus:border-primary/40 resize-none"
+            />
+            <div className="flex gap-2">
+              {['normal', 'vivid', 'lucid'].map(mood => (
+                <button key={mood} onClick={() => setNewDream(prev => ({ ...prev, mood }))}
+                  className={`px-3 py-1 text-[8px] font-bold tracking-wider transition-all ${
+                    newDream.mood === mood ? 'bg-[#8B5CF6] text-white' : 'border border-primary/20 text-primary/60'
+                  }`}
+                >
+                  {mood.toUpperCase()}
+                </button>
+              ))}
+            </div>
+            <button onClick={handleSave}
+              className="w-full py-2 bg-primary text-secondary text-[9px] font-bold tracking-wider hover:bg-primary/90 transition-all"
+            >
+              SAVE DREAM
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Dream list */}
+      <div className="px-4 pt-3 space-y-2.5 flex-1">
+        {loadingDreams && (
+          <p className="text-[9px] text-primary/30 text-center py-6">Loading dreams…</p>
+        )}
+        {!loadingDreams && dreams.length === 0 && (
+          <p className="text-[9px] text-primary/30 text-center py-6">No dreams logged yet. Write one down and the jungle will remember it.</p>
+        )}
+        {dreams.map(dream => (
+          <div key={dream.id} className="border border-primary/20 hover:border-primary/40 transition-all p-3">
+            <div className="flex items-start justify-between mb-1.5">
+              <h3 className="text-xs font-bold tracking-wide">{dream.title}</h3>
+              <span className="text-[7px] text-primary/40">{dream.date}</span>
+            </div>
+            <p className="text-[9px] text-primary/60 mb-1.5 line-clamp-2">{dream.content}</p>
+            <div className="flex items-center gap-2">
+              <span className={`text-[7px] px-2 py-0.5 ${
+                dream.mood === 'lucid' ? 'bg-[#8B5CF6]/20 text-[#8B5CF6] border border-[#8B5CF6]/30' :
+                dream.mood === 'vivid' ? 'bg-primary/20 text-primary border border-primary/30' :
+                'bg-primary/10 text-primary/50 border border-primary/20'
+              }`}>
+                {dream.mood.toUpperCase()}
+              </span>
+              {dream.tags.map(tag => (
+                <span key={tag} className="text-[7px] text-primary/30">#{tag}</span>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Stats */}
+      <div className="px-4 py-4">
+        <div className="border border-[#8B5CF6]/20 p-3 text-center">
+          <Star size={14} className="mx-auto mb-1.5 text-[#8B5CF6]" />
+          <p className="text-[10px] text-primary/50">{dreams.length} dream{dreams.length === 1 ? '' : 's'} logged</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Dojo Tab (Fitness, from dojo.js) ─────────────────────────────────────────
+function DojoTab() {
+  const [activeRoutine, setActiveRoutine] = useState(null);
+  const [routines, setRoutines] = useState([]);
+  const [loadingRoutine, setLoadingRoutine] = useState(true);
+  const [dojoXp, setDojoXp] = useState(null);
+
+  // GET /api/fanbase/my-dojo -> THE Dojo fanbase (fanbaseType 'fitness'), then
+  // GET /api/routine/today?fanbaseId= -> the current week's entry for today
+  // (day / name / isRest / duration / exercises[]). Replaces four MOCK_ROUTINES.
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const dojoRes = await fetch('/api/fanbase/my-dojo', { credentials: 'include' });
+        const dojo = dojoRes.ok ? await dojoRes.json() : null;
+        const fanbaseId = dojo && dojo.fanbase ? dojo.fanbase._id : null;
+        if (!cancelled && dojo && dojo.membership) setDojoXp(dojo.membership.dojoXp);
+        if (!fanbaseId) {
+          if (!cancelled) setRoutines([]);
+          return;
+        }
+
+        const res = await fetch(`/api/routine/today?fanbaseId=${encodeURIComponent(fanbaseId)}`, { credentials: 'include' });
+        if (!res.ok) {
+          if (!cancelled) setRoutines([]);
+          return;
+        }
+        const body = await res.json();
+        const today = body && body.today;
+        if (!today) {
+          if (!cancelled) setRoutines([]);
+          return;
+        }
+
+        if (!cancelled) {
+          setRoutines([{
+            id: today.day || 'today',
+            name: today.name || today.day,
+            duration: today.isRest ? 'Rest' : `${today.duration || 0} min`,
+            level: today.isRest ? 'recovery' : 'today',
+            exercises: Array.isArray(today.exercises) ? today.exercises : [],
+            focus: today.day || 'Today',
+            color: today.isRest ? '#10B981' : '#8B5CF6',
+          }]);
+        }
+      } catch {
+        if (!cancelled) setRoutines([]);
+      } finally {
+        if (!cancelled) setLoadingRoutine(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, []);
+
+  return (
+    <div className="flex flex-col h-full bg-secondary text-primary overflow-y-auto">
+      {/* Header */}
+      <div className="px-4 py-3 border-b border-primary/10 flex-shrink-0">
+        <div className="flex items-center gap-2 mb-1">
+          <Dumbbell size={16} className="text-primary" />
+          <h1 className="text-xs font-bold tracking-[0.15em]">THE DOJO</h1>
+        </div>
+        <p className="text-[9px] text-primary/50">Train your body. Level up your mind.</p>
+      </div>
+
+      {/* Stats */}
+      <div className="grid grid-cols-3 gap-2 px-4 py-3 flex-shrink-0">
+        {[
+          // Only XP is backed by a real field today (FanbaseMembership.dojoXp from
+          // GET /api/fanbase/my-dojo). The others have no source yet, so they show
+          // a dash rather than an invented number.
+          { icon: Zap, label: 'STREAK', value: '—' },
+          { icon: Flame, label: 'CALORIES', value: '—' },
+          { icon: Target, label: 'XP', value: dojoXp == null ? '—' : String(dojoXp) },
+        ].map(stat => {
+          const Icon = stat.icon;
+          return (
+            <div key={stat.label} className="border border-primary/20 p-2.5 text-center">
+              <Icon size={14} className="mx-auto mb-1 text-[#8B5CF6]" />
+              <p className="text-[11px] font-bold">{stat.value}</p>
+              <p className="text-[7px] text-primary/40 tracking-wider">{stat.label}</p>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Routines */}
+      <div className="px-4 flex-1">
+        <h2 className="text-[10px] font-bold tracking-[0.15em] mb-2.5 text-primary/60 uppercase">Today's Routines</h2>
+        <div className="space-y-2.5">
+          {loadingRoutine && (
+            <p className="text-[9px] text-primary/30 text-center py-6">Loading your programme…</p>
+          )}
+          {!loadingRoutine && routines.length === 0 && (
+            <p className="text-[9px] text-primary/30 text-center py-6">No programme yet. Complete Dojo onboarding and Kura will build your week.</p>
+          )}
+          {routines.map(routine => (
+            <div key={routine.id}
+              onClick={() => setActiveRoutine(activeRoutine === routine.id ? null : routine.id)}
+              className={`border transition-all p-3 cursor-pointer ${
+                activeRoutine === routine.id ? 'border-primary/40 bg-primary/5' : 'border-primary/20 hover:border-primary/40'
+              }`}
+            >
+              <div className="flex items-center justify-between mb-1.5">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded flex items-center justify-center"
+                    style={{ background: `${routine.color}22` }}
+                  >
+                    <Dumbbell size={12} color={routine.color} />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-bold tracking-wide">{routine.name}</h3>
+                    <p className="text-[8px] text-primary/40">{routine.focus} • {routine.level}</p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-[11px] font-bold text-[#8B5CF6]">{routine.duration}</p>
+                  <p className="text-[7px] text-primary/40">{routine.exercises.length} exercises</p>
+                </div>
+              </div>
+              {activeRoutine === routine.id && (
+                <div className="mt-2.5 pt-2.5 border-t border-primary/10">
+                  {routine.exercises.length > 0 && (
+                    <div className="space-y-1.5 mb-2.5">
+                      {routine.exercises.map((ex, i) => (
+                        <div key={`${ex.name}-${i}`} className="flex items-center justify-between text-[9px] gap-2">
+                          <span className="text-primary/70 truncate">{ex.name}</span>
+                          <span className="text-primary/40 whitespace-nowrap">
+                            {ex.sets ? `${ex.sets}×` : ''}{ex.reps || ''}
+                            {ex.rest && ex.rest !== '—' ? ` • rest ${ex.rest}` : ''}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <button className="w-full py-2 bg-primary text-secondary text-[9px] font-bold tracking-wider hover:bg-primary/90 transition-all flex items-center justify-center gap-1">
+                    <Zap size={11} /> START WORKOUT
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* AI Generate CTA */}
+      <div className="px-4 py-4">
+        <button className="w-full border border-[#8B5CF6]/30 p-3 hover:border-[#8B5CF6]/60 transition-all text-center group">
+          <Sparkles size={14} className="mx-auto mb-1.5 text-[#8B5CF6]" />
+          <h3 className="text-[10px] font-bold tracking-wider text-[#8B5CF6] mb-0.5">AI-GENERATED ROUTINE</h3>
+          <p className="text-[8px] text-primary/40">Let Kura create a personalized workout for you</p>
+        </button>
       </div>
     </div>
   );
@@ -159,8 +2190,9 @@ function StatusBar() {
 function TabBar({ activeTab, setActiveTab }) {
   const tabs = [
     { id: 'home',   label: 'HOME',   Icon: IconHome },
-    { id: 'events', label: 'EVENTS', Icon: IconTicket },
-    { id: 'store',  label: 'STORE',  Icon: IconStore },
+    { id: 'kura',   label: 'KURA',   Icon: () => <Sparkles size={16} className="text-[#8B5CF6]" /> },
+    { id: 'dreams', label: 'DREAMS', Icon: () => <Moon size={16} className="text-[#8B5CF6]" /> },
+    { id: 'dojo',   label: 'DOJO',   Icon: () => <Dumbbell size={16} className="text-primary" /> },
   ];
   return (
     <div style={{ display: 'flex', height: 48, background: '#151413', flexShrink: 0 }}>
@@ -185,296 +2217,26 @@ function TabBar({ activeTab, setActiveTab }) {
   );
 }
 
-// ─── Map Background ────────────────────────────────────────────────────────────
-// Renders static jungle trees at percentage positions of the frozen canvas
-// (cw × ch). Positions are computed once from the frozen dimensions and never
-// change on viewport resize — the canvas itself is frozen, so the trees are
-// frozen with it.
-function MapBackground({ cw, ch }) {
-  // Each entry: [leftFrac, topFrac, widthFrac, src, zIndex]
-  const TREES = [
-    // ── Top band ──────────────────────────────────────────────────────────────
-    [-0.05, -0.07, 0.30, '/jungle/Property%201=A.svg',           3],
-    [ 0.22, -0.08, 0.19, '/jungle/Property%201=A%20(1).svg',     3],
-    [ 0.37, -0.08, 0.22, '/jungle/Property%201=Palm%20Tree.svg', 3],
-    [ 0.56, -0.08, 0.19, '/jungle/Property%201=B%20(1).svg',     3],
-    [ 0.73, -0.07, 0.30, '/jungle/Property%201=B.svg',           3],
-    // ── Left column ───────────────────────────────────────────────────────────
-    [-0.08,  0.13, 0.27, '/jungle/Property%201=A.svg',           3],
-    [-0.06,  0.28, 0.18, '/jungle/Property%201=A%20(1).svg',     3],
-    [-0.05,  0.44, 0.21, '/jungle/Property%201=Shrubs.svg',      2],
-    [-0.06,  0.58, 0.18, '/jungle/Property%201=B%20(1).svg',     3],
-    [-0.06,  0.72, 0.25, '/jungle/Property%201=B.svg',           3],
-    // ── Right column ──────────────────────────────────────────────────────────
-    [ 0.78,  0.11, 0.28, '/jungle/Property%201=B.svg',           3],
-    [ 0.83,  0.25, 0.17, '/jungle/Property%201=B%20(1).svg',     3],
-    [ 0.84,  0.42, 0.18, '/jungle/Property%201=Shrubs.svg',      2],
-    [ 0.82,  0.57, 0.17, '/jungle/Property%201=A%20(1).svg',     3],
-    [ 0.77,  0.70, 0.25, '/jungle/Property%201=A.svg',           3],
-    // ── Bottom band ───────────────────────────────────────────────────────────
-    [-0.04,  0.82, 0.27, '/jungle/Property%201=A.svg',           3],
-    [ 0.19,  0.86, 0.18, '/jungle/Property%201=A%20(1).svg',     3],
-    [ 0.38,  0.87, 0.21, '/jungle/Property%201=Palm%20Tree.svg', 3],
-    [ 0.61,  0.86, 0.18, '/jungle/Property%201=B%20(1).svg',     3],
-    [ 0.72,  0.82, 0.27, '/jungle/Property%201=B.svg',           3],
-    // ── Interior accents ──────────────────────────────────────────────────────
-    [ 0.12,  0.38, 0.12, '/jungle/Property%201=Rocks.svg',       2],
-    [ 0.73,  0.33, 0.10, '/jungle/Property%201=Flowers.svg',     2],
-    [ 0.09,  0.60, 0.14, '/jungle/Property%201=Flowers.svg',     2],
-    [ 0.75,  0.58, 0.12, '/jungle/Property%201=Rocks.svg',       2],
-  ];
-
-  return (
-    <div aria-hidden="true" style={{ position: 'absolute', inset: 0, overflow: 'visible', pointerEvents: 'none' }}>
-      {/* Faint grid */}
-      <div style={{
-        position: 'absolute', inset: 0,
-        backgroundImage: `linear-gradient(to right,rgba(171,212,158,0.06) 1px,transparent 1px),
-                          linear-gradient(to bottom,rgba(171,212,158,0.06) 1px,transparent 1px)`,
-        backgroundSize: '80px 80px',
-        zIndex: 1,
-      }}/>
-      {TREES.map(([lf, tf, wf, src, z], i) => (
-        <img
-          key={i} src={src} alt=""
-          style={{
-            position: 'absolute',
-            left: lf * cw, top: tf * ch,
-            width: wf * cw, height: 'auto',
-            zIndex: z,
-            filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.85))',
-          }}
-        />
-      ))}
-    </div>
-  );
-}
-
-// ─── Desk Scene ────────────────────────────────────────────────────────────────
-// Exact replica of 8.svg desk arrangement (top-down perspective).
-// Coordinate origin: top-left. y=0 = back of desk (far from viewer).
-// Layout:
-//   z=2  Table (top:0, w=300) — desk surface
-//   z=3  Computer (top:0, right:10) — back-right on table
-//   z=3  Portfolio (top:20, left:12) — left of table, rotated -8°
-//   z=4  Journal (top:30, left:110) — centre of table, slightly in front of portfolio
-//   z=3  Book Pile (top:100, left:18) — floor, front-left of desk
-//   z=3  Chair (top:140, left:128) — floor, front-centre-right, rotated -12°
-function DeskScene({ activeDeskItem, onDeskClick }) {
-  return (
-    <div
-      onClick={onDeskClick}
-      style={{ position: 'relative', width: 310, height: 255, cursor: onDeskClick ? 'pointer' : 'default' }}
-    >
-      {/* Table surface — full width, back of scene */}
-      <img src={DESK.TABLE} alt="" aria-hidden="true" style={{
-        position: 'absolute', width: 300, top: 0, left: 5,
-        zIndex: 2, pointerEvents: 'none',
-      }}/>
-
-      {/* Computer — back-right of table (monitor at back, keyboard at front) */}
-      <img src={DESK.COMPUTER} alt="" aria-hidden="true" style={{
-        position: 'absolute', height: 112, width: 'auto', top: 0, right: 10,
-        zIndex: 3, pointerEvents: 'none',
-      }}/>
-
-      {/* Portfolio — left of table, slight counter-clockwise tilt */}
-      <img src={DESK.PORTFOLIO} alt="" aria-hidden="true" style={{
-        position: 'absolute', height: 92, width: 'auto', top: 18, left: 12,
-        zIndex: 3, pointerEvents: 'none',
-        transform: 'rotate(-8deg)', transformOrigin: 'center bottom',
-      }}/>
-
-      {/* Journal — centre of table, slightly in front of portfolio */}
-      <img src={DESK.JOURNAL} alt="" aria-hidden="true" style={{
-        position: 'absolute', height: 80, width: 'auto', top: 28, left: 110,
-        zIndex: 4, pointerEvents: 'none',
-      }}/>
-
-      {/* Book pile — front-left floor (in front of desk, closer to viewer) */}
-      <img src={DESK.BOOKPILE} alt="" aria-hidden="true" style={{
-        position: 'absolute', height: 54, width: 'auto', top: 20, left: 18,
-        zIndex: 3, pointerEvents: 'none',
-      }}/>
-
-      {/* Chair — front-centre-right floor, slight rotation matching reference */}
-      <img src={DESK.CHAIR} alt="" aria-hidden="true" style={{
-        position: 'absolute', width: 88, top: 100, left: 128,
-        zIndex: 1, pointerEvents: 'none',
-        transform: 'rotate(-12deg)', transformOrigin: 'center center',
-      }}/>
-    </div>
-  );
-}
-
-// ─── Dream Desk Popup ─────────────────────────────────────────────────────────
-// Triggered when user taps the desk. Exact replica of frame 7 popup:
-//   Header:    135×32  #ABD49E   "DREAM DESK ▼"   (x=199, y=386)
-//   JOURNAL:   135×30  #101010   (y=418, gap=5)
-//   RADIO:     135×38  #101010   (y=453, gap=5)
-//   PORTFOLIO: 135×38  #101010   (y=496, gap=5)
-//   SLUM BOOK: 135×38  #101010   (y=539)
-// Backdrop overlay closes popup on outside click.
-function DreamDeskPopup({ activeDeskItem, setActiveDeskItem, onClose, style = {} }) {
-  const rows = [
-    { item: 'JOURNAL',   h: 30 },
-    { item: 'RADIO',     h: 38 },
-    { item: 'PORTFOLIO', h: 38 },
-    { item: 'SLUM BOOK', h: 38 },
-  ];
-  return (
-    <div style={{ width: 135, ...style }}>
-      {/* Header */}
-      <div style={{
-        height: 32, display: 'flex', alignItems: 'center',
-        justifyContent: 'space-between', paddingInline: 10,
-        background: '#ABD49E',
-      }}>
-        <span style={{ fontFamily: 'monospace', fontSize: 10, fontWeight: 700, color: '#101010', letterSpacing: '0.08em' }}>DREAM DESK</span>
-        <span style={{ fontSize: 9, color: '#101010' }}>▼</span>
-      </div>
-      {/* Items — 5px gap between each row (shows dark bg behind) */}
-      {rows.map(({ item, h }) => (
-        <button
-          key={item}
-          onClick={() => { setActiveDeskItem(item); onClose(); }}
-          style={{
-            display: 'block', width: '100%', height: h,
-            marginTop: 5,
-            background: '#101010', border: '1px solid rgba(171,212,158,0.18)',
-            color: '#ABD49E', fontFamily: 'monospace', fontSize: 10,
-            letterSpacing: '0.08em', textTransform: 'uppercase',
-            textAlign: 'left', paddingInline: 10, cursor: 'pointer',
-          }}
-        >
-          {item}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-// ─── Home Scene ───────────────────────────────────────────────────────────────
-// Frozen-canvas approach: captures the container size ONCE on mount, then
-// renders everything (jungle + desk + popup) inside a fixed-size div that is
-// always centred in the container. When the browser window is resized, the
-// container clips or expands around the fixed canvas — no reflow, nothing moves.
-function HomeScene({ activeDeskItem, setActiveDeskItem }) {
-  const [deskPopupOpen, setDeskPopupOpen] = useState(false);
-  const containerRef = useRef(null);
-  const [frozen, setFrozen] = useState(null); // { w, h } — captured once
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (el && !frozen) setFrozen({ w: el.offsetWidth, h: el.offsetHeight });
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  return (
-    <div
-      ref={containerRef}
-      style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden', background: '#151413' }}
-    >
-      {frozen && (
-        // One unified frozen canvas — centred, fixed size, never resizes.
-        // Clicking anywhere on it (except popup) closes any open popup.
-        <div
-          style={{
-            position: 'absolute',
-            left: '50%', top: '50%',
-            transform: 'translate(-50%, -50%)',
-            width: frozen.w, height: frozen.h,
-          }}
-          onClick={() => setDeskPopupOpen(false)}
-        >
-          <MapBackground cw={frozen.w} ch={frozen.h} />
-
-          {/* Dream desk — centred in the frozen canvas */}
-          <div
-            style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', zIndex: 4 }}
-            onClick={e => { e.stopPropagation(); setDeskPopupOpen(true); }}
-          >
-            <DeskScene activeDeskItem={activeDeskItem} onDeskClick={null} />
-          </div>
-
-          {/* Dream Desk popup — to the right of the desk */}
-          {deskPopupOpen && (
-            <div
-              style={{ position: 'absolute', left: `calc(50% + 170px)`, top: `calc(50% - 100px)`, zIndex: 20 }}
-              onClick={e => e.stopPropagation()}
-            >
-              <DreamDeskPopup
-                activeDeskItem={activeDeskItem}
-                setActiveDeskItem={setActiveDeskItem}
-                onClose={() => setDeskPopupOpen(false)}
-              />
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── Events Tab ───────────────────────────────────────────────────────────────
-// Uses the shared EventCard component designed to spec.
-const MOCK_EVENTS = [
-  { _id: '1', coverImage: null, title: 'ENTERTAINMENT WEEK AFRICA 2025', location: 'LANDMARK CENTER, VI LAGOS', date: '2025-11-22', time: '10:00AM', price: 'FREE', tags: ['PARTY', 'CONFERENCE', 'TRADE FAIR'] },
-  { _id: '2', coverImage: null, title: 'LUCID JUNGLES LAUNCH PARTY',    location: 'ART TECH HUB, IKEJA',         date: '2025-12-15', time: '8:00PM',  price: '₦5,000', tags: ['MUSIC', 'NETWORKING', 'ART'] },
-];
-
-function EventsTab({ events }) {
-  const items = (events && events.length) ? events : MOCK_EVENTS;
-  return (
-    <div style={{ height: '100%', overflowY: 'auto', background: '#151413', paddingTop: 8 }}>
-      {items.map(ev => <EventCard key={ev._id} event={ev}/>)}
-    </div>
-  );
-}
-
-// ─── Store Tab ────────────────────────────────────────────────────────────────
-// Uses the shared ProductsCard component designed to spec.
-const MOCK_PRODUCTS = [
-  { _id: '1', image: null, title: 'Porsche 911 Mod',         description: 'Modified Classic Porsche 911', discount: '10% Off',   price: '₦300,000,000', time: '20 DAYS',        tags: ['CUSTOM', 'VEHICLES'] },
-  { _id: '2', image: null, title: 'Handcrafted Leather Bag', description: 'Premium leather, made to order', discount: null,        price: '₦45,000',       time: 'MADE TO ORDER', tags: ['FASHION', 'HANDMADE'] },
-  { _id: '3', image: null, title: 'Digital Art Print',       description: 'High-res digital artwork',       discount: null,        price: '₦12,000',       time: 'INSTANT DL',    tags: ['ART', 'DIGITAL'] },
-];
-
-function StoreTab({ items }) {
-  const products = (items && items.length) ? items : MOCK_PRODUCTS;
-  if (!products || products.length === 0) {
-    return (
-      <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#151413' }}>
-        <p style={{ fontFamily: 'Averia Sans Libre, sans-serif', fontSize: 14, color: '#ABD49E', textAlign: 'center', padding: '0 32px' }}>
-          Available Products and Services
-        </p>
-      </div>
-    );
-  }
-  return (
-    <div style={{ height: '100%', overflowY: 'auto', background: '#151413', paddingTop: 4 }}>
-      <p style={{ padding: '8px 16px 6px', fontFamily: 'monospace', fontSize: 10, color: '#ABD49E', letterSpacing: '0.05em' }}>
-        Available Products and Services
-      </p>
-      {products.map(p => <ProductsCard key={p._id} product={p}/>)}
-    </div>
-  );
-}
-
 // ─── Chat Panel ───────────────────────────────────────────────────────────────
-// Frame 5/6: message thread that replaces the profile drawer content
 function ChatPanel({ profile, onClose }) {
   const [message, setMessage] = useState('');
-  const mockMessages = [
-    { id: 1, them: true,  text: 'Hiya Chukwuka, was a pleasure meeting you today.' },
-    { id: 2, them: false, text: "Fam! I'm really glad I came outside, and scanned that code." },
-  ];
+  // There is no messaging endpoint on the backend yet (no /api/chat route), so the
+  // thread starts empty and sending is a local echo. The two invented messages that
+  // were hardcoded here posed as a real conversation between the viewer and this
+  // base's owner.
+  const [thread, setThread] = useState([]);
+
+  const handleSend = () => {
+    const text = message.trim();
+    if (!text) return;
+    setThread(prev => [...prev, { id: Date.now(), them: false, text }]);
+    setMessage('');
+  };
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#151413' }}>
-      {/* Chevron handle */}
       <div style={{ height: 18, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
         <div style={{ width: 32, height: 3, background: '#ABD49E' }}/>
       </div>
-      {/* Header */}
       <div style={{ height: 44, display: 'flex', alignItems: 'center', gap: 10, paddingInline: 12, background: '#ABD49E', flexShrink: 0 }}>
         <div style={{ width: 32, height: 32, background: '#101010', flexShrink: 0, overflow: 'hidden' }}>
           {profile.avatar && <img src={profile.avatar} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }}/>}
@@ -484,9 +2246,13 @@ function ChatPanel({ profile, onClose }) {
           <IconClose color="#101010"/>
         </button>
       </div>
-      {/* Messages */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {mockMessages.map(msg => (
+        {thread.length === 0 && (
+          <p style={{ fontFamily: 'monospace', fontSize: 11, color: 'rgba(171,212,158,0.4)', textAlign: 'center', marginTop: 12 }}>
+            No messages yet.
+          </p>
+        )}
+        {thread.map(msg => (
           <div key={msg.id} style={{ display: 'flex', alignItems: 'center', justifyContent: msg.them ? 'flex-start' : 'flex-end' }}>
             {msg.them && <svg width="6" height="8" viewBox="0 0 6 8" style={{ flexShrink: 0, marginRight: 4 }}><path d="M6 4L0 0V8L6 4Z" fill="#ABD49E"/></svg>}
             <div style={{
@@ -500,13 +2266,12 @@ function ChatPanel({ profile, onClose }) {
           </div>
         ))}
       </div>
-      {/* Input */}
       <div style={{ display: 'flex', borderTop: '1px solid rgba(171,212,158,0.25)', flexShrink: 0 }}>
-        <input value={message} onChange={e => setMessage(e.target.value)} style={{
+        <input value={message} onChange={e => setMessage(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSend()} placeholder="Message…" style={{
           flex: 1, height: 44, padding: '0 12px', background: 'transparent',
           border: 'none', outline: 'none', color: '#ABD49E', fontFamily: 'monospace', fontSize: 12,
         }}/>
-        <button style={{
+        <button onClick={handleSend} style={{
           width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center',
           background: 'none', border: 'none', borderLeft: '1px solid rgba(171,212,158,0.25)', cursor: 'pointer',
         }}>
@@ -518,11 +2283,7 @@ function ChatPanel({ profile, onClose }) {
 }
 
 // ─── Profile Drawer ───────────────────────────────────────────────────────────
-// Collapsed (64px): green strip — photo + name + chevron
-// Open (360px): avatar 97×97, name, stats, XP bar, bio, action button
-// Chat mode: ChatPanel replaces drawer content
 function ProfileDrawer({ open, onToggle, onClose, profile, connectionState, onConnect, chatOpen, onChatToggle }) {
-
   if (chatOpen) {
     return (
       <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, height: 380, background: '#151413', zIndex: 200 }}>
@@ -536,25 +2297,20 @@ function ProfileDrawer({ open, onToggle, onClose, profile, connectionState, onCo
 
   return (
     <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: '#151413', zIndex: 200 }}>
-      {/* Collapsed strip — always visible */}
       <button onClick={onToggle} style={{
         width: '100%', height: 64, display: 'flex', alignItems: 'center',
         paddingInline: 12, gap: 12, background: '#ABD49E',
         border: 'none', cursor: 'pointer', position: 'relative',
       }}>
-        {/* Chevron centered at top */}
         <div style={{ position: 'absolute', top: 7, left: '50%', transform: 'translateX(-50%)' }}>
           <IconChevron up={open}/>
         </div>
-        {/* Photo — 50px, fills most of strip height */}
         <div style={{ width: 50, height: 50, background: '#101010', flexShrink: 0, overflow: 'hidden', marginTop: 10 }}>
           {profile.avatar && <img src={profile.avatar} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }}/>}
         </div>
-        {/* Name */}
         <span style={{ flex: 1, fontFamily: 'monospace', fontSize: 12, color: '#101010', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', marginTop: 10, textAlign: 'left' }}>
           {profile.displayName}
         </span>
-        {/* X button — closes/collapses drawer */}
         <div onClick={(e) => { e.stopPropagation(); onClose(); }} style={{ marginTop: 10, display: 'flex', alignItems: 'center', padding: 4, cursor: 'pointer' }}>
           <IconClose color="#101010"/>
         </div>
@@ -562,14 +2318,12 @@ function ProfileDrawer({ open, onToggle, onClose, profile, connectionState, onCo
 
       {open && (
         <div style={{ background: '#151413' }}>
-          {/* Close */}
           <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '10px 16px 0' }}>
             <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex' }}>
               <IconClose color="#ABD49E"/>
             </button>
           </div>
 
-          {/* Avatar (97×97) + name + stats */}
           <div style={{ display: 'flex', gap: 14, padding: '0 16px 14px' }}>
             <div style={{ width: 97, height: 97, background: '#ABD49E', flexShrink: 0, overflow: 'hidden' }}>
               {profile.avatar && <img src={profile.avatar} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }}/>}
@@ -593,8 +2347,6 @@ function ProfileDrawer({ open, onToggle, onClose, profile, connectionState, onCo
             </div>
           </div>
 
-          {/* XP bar — 149px green (rank) + 206px dark (XP count) = 355px total @ x=28 */}
-          {/* Implemented as flex with ratio matching frame measurements */}
           <div style={{ margin: '0 16px 12px', display: 'flex', border: '1px solid rgba(171,212,158,0.25)' }}>
             <div style={{ flex: profile.xpCurrent, height: 28, display: 'flex', alignItems: 'center', paddingInline: 8, background: '#ABD49E', overflow: 'hidden' }}>
               <span style={{ fontFamily: 'monospace', fontSize: 9, color: '#101010', fontWeight: 700, whiteSpace: 'nowrap', letterSpacing: '0.06em' }}>
@@ -608,14 +2360,12 @@ function ProfileDrawer({ open, onToggle, onClose, profile, connectionState, onCo
             </div>
           </div>
 
-          {/* Bio */}
           <div style={{ margin: '0 16px 14px' }}>
             <p style={{ fontFamily: 'Averia Sans Libre, sans-serif', fontSize: 13, color: '#E3E3E3', lineHeight: 1.55 }}>
               {profile.bio}
             </p>
           </div>
 
-          {/* Action button — 380×30 in frame, full content-width */}
           <div style={{ padding: '0 16px 16px' }}>
             <button onClick={!isPending && !isConnected ? onConnect : undefined} style={{
               width: '100%', height: 30,
@@ -635,26 +2385,21 @@ function ProfileDrawer({ open, onToggle, onClose, profile, connectionState, onCo
 }
 
 // ─── Connected View — Full-screen immersive map ───────────────────────────────
-// Same frozen-canvas pattern as HomeScene but full-screen (100dvh).
-// Non-scrolling UI overlays (border frame, volume, menu, back button) are
-// positioned in the outer container — they never enter the frozen canvas.
 function ConnectedView({ profile }) {
   const router = useRouter();
   const [activeDeskItem, setActiveDeskItem] = useState(null);
   const [deskPopupOpen, setDeskPopupOpen] = useState(false);
   const containerRef = useRef(null);
   const [frozen, setFrozen] = useState(null);
+  const zoomedGrid = GRID_SIZE * ZOOM_FACTOR;
 
   useEffect(() => {
     const el = containerRef.current;
     if (el && !frozen) setFrozen({ w: el.offsetWidth, h: el.offsetHeight });
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
-    // Outer container — full screen, overflow hidden
-    <div ref={containerRef} style={{ position: 'relative', width: '100%', height: '100dvh', overflow: 'hidden', background: '#151413' }} className="bleed-nav">
-
-      {/* Frozen jungle canvas */}
+    <div ref={containerRef} style={{ position: 'relative', width: '100%', height: '100dvh', overflow: 'hidden', background: '#151413' }}>
       {frozen && (
         <div
           style={{
@@ -662,54 +2407,57 @@ function ConnectedView({ profile }) {
             left: '50%', top: '50%',
             transform: 'translate(-50%, -50%)',
             width: frozen.w, height: frozen.h,
+            overflow: 'hidden',
           }}
           onClick={() => setDeskPopupOpen(false)}
         >
-          <MapBackground cw={frozen.w} ch={frozen.h} />
+          <div style={{ position: 'relative', width: frozen.w, height: frozen.h }}>
+            <MapBackground cw={frozen.w} ch={frozen.h} username={profile.username} />
 
-          {/* Dream desk */}
-          <div
-            style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', zIndex: 4 }}
-            onClick={e => { e.stopPropagation(); setDeskPopupOpen(true); }}
-          >
-            <DeskScene activeDeskItem={activeDeskItem} onDeskClick={null} />
-          </div>
-
-          {deskPopupOpen && (
             <div
-              style={{ position: 'absolute', left: `calc(50% + 170px)`, top: `calc(50% - 100px)`, zIndex: 20 }}
-              onClick={e => e.stopPropagation()}
+              style={{
+                position: 'absolute',
+                left: '50%',
+                top: '50%',
+                transform: 'translate(-50%, -50%)',
+                zIndex: 4,
+              }}
+              onClick={e => { e.stopPropagation(); setDeskPopupOpen(true); }}
             >
-              <DreamDeskPopup
-                activeDeskItem={activeDeskItem}
-                setActiveDeskItem={setActiveDeskItem}
-                onClose={() => setDeskPopupOpen(false)}
-              />
+              <DeskScene activeDeskItem={activeDeskItem} onDeskClick={null} />
             </div>
-          )}
+
+            {deskPopupOpen && (
+              <div
+                style={{ position: 'absolute', left: `calc(50% + 170px)`, top: `calc(50% - 100px)`, zIndex: 20 }}
+                onClick={e => e.stopPropagation()}
+              >
+                <DreamDeskPopup
+                  activeDeskItem={activeDeskItem}
+                  setActiveDeskItem={setActiveDeskItem}
+                  onClose={() => setDeskPopupOpen(false)}
+                />
+              </div>
+            )}
+          </div>
         </div>
       )}
 
-      {/* ── UI overlays — live in the outer container, never scroll ── */}
-
-      {/* Inner border frame */}
       <div style={{
         position: 'absolute', top: 13, left: 13, right: 13, bottom: 13,
         border: '1px solid rgba(171,212,158,0.1)', pointerEvents: 'none', zIndex: 2,
       }}/>
 
-      {/* Desktop: Base name label */}
       <div className="hidden md:flex" style={{
         position: 'absolute', top: 52, left: 77, width: 270, height: 45,
         background: '#ABD49E', alignItems: 'center', paddingInline: 14, gap: 8, zIndex: 10,
       }}>
         <span style={{ flex: 1, fontFamily: 'monospace', fontSize: 13, color: '#101010', fontWeight: 700, letterSpacing: '0.05em' }}>
-          {profile.displayName}&apos;S BASE
+          {profile.displayName}'S BASE
         </span>
         <span style={{ fontSize: 9, color: '#101010' }}>▼</span>
       </div>
 
-      {/* Top-right: volume + menu */}
       <div style={{ position: 'absolute', top: 16, right: 16, display: 'flex', gap: 6, zIndex: 10 }}>
         <button style={{ width: 37, height: 37, background: '#ABD49E', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer' }}>
           <IconVolume color="#101010"/>
@@ -719,7 +2467,6 @@ function ConnectedView({ profile }) {
         </button>
       </div>
 
-      {/* Desktop: bottom-right action icons */}
       <div className="hidden md:flex" style={{ position: 'absolute', bottom: 60, right: 16, flexDirection: 'column', gap: 4, zIndex: 10 }}>
         <button style={{ width: 44, height: 44, background: '#101010', border: '1px solid #ABD49E', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
           <IconSmiley/>
@@ -732,7 +2479,6 @@ function ConnectedView({ profile }) {
         </button>
       </div>
 
-      {/* Back */}
       <button onClick={() => router.back()} style={{
         position: 'absolute', bottom: 20, left: 20, zIndex: 10,
         background: 'rgba(13,16,9,0.80)', border: '1px solid rgba(171,212,158,0.4)',
@@ -743,127 +2489,46 @@ function ConnectedView({ profile }) {
     </div>
   );
 }
-// ─── Page ─────────────────────────────────────────────────────────────────────
-// The profile drawer renders the XP bar as a flex ratio, so neither side of it
-// may be zero or the bar collapses. Progress reads within the current block.
-const XP_BLOCK = 100;
-const xpBar = (owner) => {
-  const xp = Number(owner && owner.xp) || 0;
-  return Math.min(XP_BLOCK - 1, Math.max(1, xp % XP_BLOCK));
-};
 
-export default function UserBase() {
+// ─── Server-side props — ensures dynamic route works ─────────────────────────
+export async function getServerSideProps({ params }) {
+  return {
+    props: {
+      username: params?.username || null,
+    },
+  };
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+function UserBase({ username: ssrUsername, ownerId }) {
   const router = useRouter();
   const { username } = router.query;
-  // The slice is registered as `registerSlice` (store/index.js). This previously
-  // read `state.register`, which does not exist — so the viewer was never known.
-  const currentUser = useSelector(state => state.registerSlice);
+  useHideBottomNav(true);
 
   const [activeTab, setActiveTab]             = useState('home');
   const [drawerOpen, setDrawerOpen]           = useState(false);
   const [chatOpen, setChatOpen]               = useState(false);
   const [activeDeskItem, setActiveDeskItem]   = useState(null);
-  const [connectionState, setConnectionState] = useState('stranger'); // stranger | pending | connected
-  const [visits, setVisits]                   = useState(null);
-  const [visitNote, setVisitNote]             = useState('');
+  const [connectionState, setConnectionState] = useState('stranger');
 
-  // Guard this dynamic route. Before this, any single-segment path rendered a
-  // fabricated base — real-looking stats and all — so /lucidjunglz looked like a
-  // live profile. Now an explicit 404 from the API renders the not-found screen.
-  // It fails open (see hooks/useUsernameLookup.js): if the API can't be reached
-  // we render the base as before, so an outage never 404s real users.
-  const lookupState = useUsernameLookup(username);
-
-  // Whose base is this, and how inhabited is it?
-  // (GET /api/homes/u/:username — see hooks/useBaseLookup.js.)
-  const { status: baseStatus, base } = useBaseLookup(username);
-
-  const owner    = base && base.owner ? base.owner : null;
-  const liveVisits = visits || (base && base.visits) || null;
-
-  // The server decides ownership. The local check only covers the moment before
-  // the response lands, so a signed-in user opening their own URL is never
-  // greeted as a visitor.
-  const isSelf = Boolean(base && base.isSelf) || Boolean(
-    currentUser && currentUser.username && username &&
-    currentUser.username.toLowerCase() === String(username).toLowerCase()
-  );
-
-  // Standing in a base is the visit. POST /api/visit is idempotent per visitor
-  // per host per day (unique index on the Visit model), so calling it on mount is
-  // safe and a refresh cannot inflate anyone's count. Signed-out visitors are
-  // ignored by the server rather than counted as ghosts.
-  const recordVisit = useCallback(async ({ announce } = {}) => {
-    if (!username) return;
-    try {
-      const response = await fetch('/api/visit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ username }),
-      });
-      const body = await response.json().catch(() => ({}));
-
-      if (!response.ok || !body.data) {
-        if (announce) setVisitNote("Sign in to knock on someone's door.");
-        return;
-      }
-
-      setVisits(body.data.visits);
-      if (announce) {
-        setVisitNote(
-          body.data.isSelf
-            ? 'This is your own base.'
-            : body.data.firstVisitToday
-              ? "Knock sent — they'll know you stopped by."
-              : "You've already knocked here today."
-        );
-      }
-    } catch {
-      if (announce) setVisitNote('Could not reach that base.');
-    }
-  }, [username]);
-
-  useEffect(() => {
-    if (username) recordVisit();
-  }, [username, recordVisit]);
-
-  // Every number here is backed by a real field. Nothing is a placeholder.
   const profile = {
-    username:    (owner && owner.username) || username || '',
-    displayName: ((owner && owner.username) || username || 'USER').toUpperCase(),
-    avatar:      (owner && owner.profile_picture) || null,
-    bio:         (owner && owner.about) || 'Exploring creativity, technology, and human connection through immersive experiences across events, art, and play.',
-    moments:     liveVisits ? liveVisits.total : 0,          // times someone stood here
-    connections: liveVisits ? liveVisits.unique : 0,         // distinct people who have
-    followers:   (owner && owner.number_of_followers) || 0,
-    xpRank:      ((owner && owner.level) || 'Novice').toUpperCase(),
-    xpCurrent:   xpBar(owner),
-    xpMax:       XP_BLOCK,
+    username:    username || '',
+    displayName: (username || 'USER').toUpperCase(),
+    avatar:      null,
+    bio:         'Exploring creativity, technology, and human connection through immersive experiences across events, art, and play.',
+    moments:     300,
+    connections: 1279,
+    followers:   '29.7K',
+    xpRank:      'NOVICE EXPLORER',
+    xpCurrent:   44,
+    xpMax:       100,
     isPublic:    true,
   };
-
-  // A base that doesn't exist is a 404, whatever the connection state.
-  // /api/homes is authoritative when it answers; the older /api/user lookup still
-  // decides when /api/homes could not answer at all, which preserves the existing
-  // guard on a backend deployed before /api/homes existed.
-  const missing = baseStatus === BASE_LOOKUP.MISSING
-    || (lookupState === USER_LOOKUP.MISSING && baseStatus !== BASE_LOOKUP.READY);
-
-  if (missing) {
-    return (
-      <NotFoundScreen
-        documentTitle="No base by that name — Lucid Jungles"
-        title="No base by that name"
-        message={`Nobody in the jungle goes by “${username}”. Check the spelling, or head back to your own base.`}
-      />
-    );
-  }
 
   if (connectionState === 'connected') {
     return (
       <>
-        <Head><title>{profile.displayName}&apos;s Base</title></Head>
+        <Head><title>{profile.displayName}'s Base</title></Head>
         <ConnectedView profile={profile}/>
       </>
     );
@@ -887,77 +2552,23 @@ export default function UserBase() {
           fontFamily: 'monospace', fontSize: 14, color: '#ABD49E',
           letterSpacing: '0.06em',
         }}>
-          Entry Preview
+          {profile.displayName}'s Base
         </span>
       </div>
 
       <TabBar activeTab={activeTab} setActiveTab={setActiveTab}/>
 
-      {/* Divider */}
       <div style={{ height: 1, background: '#ABD49E', flexShrink: 0 }}/>
 
-      {/* ── Base status band ──────────────────────────────────────────────────
-          Identity, vitals and how inhabited this base is. This is the piece that
-          makes a base read as a *place* rather than a page — see
-          LUCID_JUNGLES_COMPETITIVE_ANALYSIS.md §7 #1, #4 and #5. */}
-      <div style={{ flexShrink: 0, background: '#151413', borderBottom: '1px solid rgba(171,212,158,0.2)', padding: '8px 16px 10px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 7 }}>
-          <span style={{ fontFamily: 'monospace', fontSize: 10, letterSpacing: '0.1em', color: '#ABD49E' }}>
-            {isSelf ? 'YOUR BASE' : `VISITING ${profile.displayName}'S BASE`}
-          </span>
-          {!isSelf && (
-            <button onClick={() => recordVisit({ announce: true })} aria-label="Knock on this base" style={{
-              background: 'transparent', border: '1px solid #ABD49E', color: '#ABD49E',
-              fontFamily: 'monospace', fontSize: 9, letterSpacing: '0.12em',
-              padding: '4px 10px', cursor: 'pointer',
-            }}>KNOCK</button>
-          )}
-        </div>
-
-        <VitalBars vitals={deriveVitals(owner, liveVisits)}/>
-
-        <p style={{ fontFamily: 'monospace', fontSize: 9, marginTop: 7, minHeight: 12, color: 'rgba(171,212,158,0.6)' }}>
-          {visitNote || (liveVisits ? `${liveVisits.total} VISITS · ${liveVisits.unique} VISITORS` : '')}
-        </p>
-      </div>
-
-      {/* Content — flex-1, position:relative so QR/Smiley are viewport-anchored */}
+      {/* Content */}
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
-        {activeTab === 'home'   && <HomeScene activeDeskItem={activeDeskItem} setActiveDeskItem={setActiveDeskItem}/>}
-        {activeTab === 'events' && <EventsTab/>}
-        {activeTab === 'store'  && <StoreTab/>}
+        {activeTab === 'home'   && <HomeScene activeDeskItem={activeDeskItem} setActiveDeskItem={setActiveDeskItem} username={username} onOpenKura={() => setActiveTab('kura')} />}
+        {activeTab === 'kura'   && <KuraTab />}
+        {activeTab === 'dreams' && <DreamsTab ownerId={ownerId} />}
+        {activeTab === 'dojo'   && <DojoTab />}
 
-        {/* QR / Smiley — float over the map but DON'T live inside the scroll container */}
-        {activeTab === 'home' && (
-          <>
-            <button aria-label="Share QR code" style={{
-              position: 'absolute', right: 0, top: '48%',
-              width: 54, height: 54, background: 'transparent', border: 'none', cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100,
-            }}>
-              <IconQR/>
-            </button>
-            <button aria-label="Profile" style={{
-              position: 'absolute', right: 0, top: 'calc(48% + 54px)',
-              width: 52, height: 52, background: 'transparent', border: 'none', cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100,
-            }}>
-              <IconSmiley/>
-            </button>
-          </>
-        )}
-
-        {/* Floating smiley on events/store */}
-        {(activeTab === 'events' || activeTab === 'store') && (
-          <button style={{
-            position: 'absolute', bottom: 14, right: 14, width: 38, height: 38,
-            background: '#151413', border: '1px solid #ABD49E',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            cursor: 'pointer', zIndex: 5,
-          }}>
-            <IconSmiley/>
-          </button>
-        )}
+        {/* QR / Smiley on home tab */}
+          {activeTab === 'home' && null}
       </div>
 
       <ProfileDrawer
@@ -973,3 +2584,45 @@ export default function UserBase() {
     </div>
   );
 }
+
+// ─── Route gate ───────────────────────────────────────────────────────────────
+// /[username] is a single-segment catch-all, so without this guard a typo like
+// /lucidjunglz renders a complete — and entirely fabricated — base, and crawlers
+// index an infinite number of fake profiles. This gate is the contract rebuilt
+// already had (commit da91698); it is re-attached here so the CONSOLIDATED base
+// design keeps the same 404 behaviour.
+//
+// It is deliberately conservative: only a *definitive* "no such user" from the API
+// shows the not-found screen. A backend outage, a 5xx or an unparseable body all
+// fail OPEN and render the base exactly as before, so an outage never 404s a real
+// user's home. See hooks/useUsernameLookup.js and hooks/useBaseLookup.js.
+//
+// The gate is its own component rather than an early return inside UserBase,
+// because UserBase declares hooks right through its body and a conditional return
+// between them would break the rules of hooks.
+export default function UserBaseRoute() {
+  const router = useRouter();
+  const { username } = router.query;
+
+  const lookupState = useUsernameLookup(username);
+  const { status: baseStatus, base } = useBaseLookup(username);
+
+  // /api/homes is authoritative when it answers; the older /api/user lookup still
+  // decides when /api/homes could not answer at all (i.e. an older deployment).
+  const missing = baseStatus === BASE_LOOKUP.MISSING
+    || (lookupState === USER_LOOKUP.MISSING && baseStatus !== BASE_LOOKUP.READY);
+
+  if (missing) {
+    return (
+      <NotFoundScreen
+        documentTitle="No base by that name — Lucid Jungles"
+        title="No base by that name"
+        message={`Nobody in the jungle goes by “${username}”. Check the spelling, or head back to your own base.`}
+      />
+    );
+  }
+
+  const owner = base && base.owner ? base.owner : null;
+  return <UserBase username={username} ownerId={owner ? owner._id : null} />;
+}
+

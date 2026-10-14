@@ -60,3 +60,6 @@ tmp/
 # They are the only surviving copies of some earlier page versions
 # (e.g. pages/[username].js.bak). Git history is the safety net for
 # removing them later — see reconciliation doc §10.
+
+# Pre-port snapshots of files replaced by CONSOLIDATED ports
+.port-backups/
