@@ -6,6 +6,8 @@ import Head from 'next/head';
 import { useSelector } from 'react-redux';
 import EventCard from '../components/EventCard';
 import ProductsCard from '../components/ProductsCard';
+import NotFoundScreen from '../components/NotFoundScreen';
+import { useUsernameLookup, USER_LOOKUP } from '../hooks/useUsernameLookup';
 
 
 const DESK_ITEMS = ['JOURNAL', 'RADIO', 'PORTFOLIO', 'SLUM BOOK'];
@@ -751,6 +753,13 @@ export default function UserBase() {
   const [activeDeskItem, setActiveDeskItem]   = useState(null);
   const [connectionState, setConnectionState] = useState('stranger'); // stranger | pending | connected
 
+  // Guard this dynamic route. Before this, any single-segment path rendered a
+  // fabricated base — real-looking stats and all — so /lucidjunglz looked like a
+  // live profile. Now an explicit 404 from the API renders the not-found screen.
+  // It fails open (see hooks/useUsernameLookup.js): if the API can't be reached
+  // we render the base as before, so an outage never 404s real users.
+  const lookupState = useUsernameLookup(username);
+
   const profile = {
     username:    username || '',
     displayName: (username || 'USER').toUpperCase(),
@@ -764,6 +773,17 @@ export default function UserBase() {
     xpMax:       100,
     isPublic:    true,
   };
+
+  // A base that doesn't exist is a 404, whatever the connection state.
+  if (lookupState === USER_LOOKUP.MISSING) {
+    return (
+      <NotFoundScreen
+        documentTitle="No base by that name — Lucid Jungles"
+        title="No base by that name"
+        message={`Nobody in the jungle goes by “${username}”. Check the spelling, or head back to your own base.`}
+      />
+    );
+  }
 
   if (connectionState === 'connected') {
     return (
