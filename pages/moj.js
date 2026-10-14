@@ -66,7 +66,7 @@ export default function MOJ() {
         <title>MOJ — Lucid Jungles</title>
       </Head>
       <main
-        className="relative w-[100dvw] h-[100dvh] font-CodeSaver overflow-hidden bg-[#151413]"
+        className="relative w-[100dvw] h-[100dvh] font-CodeSaver overflow-hidden bg-[#151413] bleed-nav"
         onClick={() => {
           if (progress >= 100 && !camryTriggered.current) {
             camryTriggered.current = true;

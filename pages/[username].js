@@ -1,13 +1,15 @@
 // pages/[username].js — Entry Preview / User Base
 // Design reference: /Frames/User-base/USER BASE/ (frames 2–11)
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import { useSelector } from 'react-redux';
 import EventCard from '../components/EventCard';
 import ProductsCard from '../components/ProductsCard';
 import NotFoundScreen from '../components/NotFoundScreen';
+import VitalBars, { deriveVitals } from '../components/VitalBars';
 import { useUsernameLookup, USER_LOOKUP } from '../hooks/useUsernameLookup';
+import { useBaseLookup, BASE_LOOKUP } from '../hooks/useBaseLookup';
 
 
 const DESK_ITEMS = ['JOURNAL', 'RADIO', 'PORTFOLIO', 'SLUM BOOK'];
@@ -650,7 +652,7 @@ function ConnectedView({ profile }) {
 
   return (
     // Outer container — full screen, overflow hidden
-    <div ref={containerRef} style={{ position: 'relative', width: '100%', height: '100dvh', overflow: 'hidden', background: '#151413' }}>
+    <div ref={containerRef} style={{ position: 'relative', width: '100%', height: '100dvh', overflow: 'hidden', background: '#151413' }} className="bleed-nav">
 
       {/* Frozen jungle canvas */}
       {frozen && (
@@ -742,16 +744,28 @@ function ConnectedView({ profile }) {
   );
 }
 // ─── Page ─────────────────────────────────────────────────────────────────────
+// The profile drawer renders the XP bar as a flex ratio, so neither side of it
+// may be zero or the bar collapses. Progress reads within the current block.
+const XP_BLOCK = 100;
+const xpBar = (owner) => {
+  const xp = Number(owner && owner.xp) || 0;
+  return Math.min(XP_BLOCK - 1, Math.max(1, xp % XP_BLOCK));
+};
+
 export default function UserBase() {
   const router = useRouter();
   const { username } = router.query;
-  const currentUser = useSelector(state => state.register);
+  // The slice is registered as `registerSlice` (store/index.js). This previously
+  // read `state.register`, which does not exist — so the viewer was never known.
+  const currentUser = useSelector(state => state.registerSlice);
 
   const [activeTab, setActiveTab]             = useState('home');
   const [drawerOpen, setDrawerOpen]           = useState(false);
   const [chatOpen, setChatOpen]               = useState(false);
   const [activeDeskItem, setActiveDeskItem]   = useState(null);
   const [connectionState, setConnectionState] = useState('stranger'); // stranger | pending | connected
+  const [visits, setVisits]                   = useState(null);
+  const [visitNote, setVisitNote]             = useState('');
 
   // Guard this dynamic route. Before this, any single-segment path rendered a
   // fabricated base — real-looking stats and all — so /lucidjunglz looked like a
@@ -760,22 +774,83 @@ export default function UserBase() {
   // we render the base as before, so an outage never 404s real users.
   const lookupState = useUsernameLookup(username);
 
+  // Whose base is this, and how inhabited is it?
+  // (GET /api/homes/u/:username — see hooks/useBaseLookup.js.)
+  const { status: baseStatus, base } = useBaseLookup(username);
+
+  const owner    = base && base.owner ? base.owner : null;
+  const liveVisits = visits || (base && base.visits) || null;
+
+  // The server decides ownership. The local check only covers the moment before
+  // the response lands, so a signed-in user opening their own URL is never
+  // greeted as a visitor.
+  const isSelf = Boolean(base && base.isSelf) || Boolean(
+    currentUser && currentUser.username && username &&
+    currentUser.username.toLowerCase() === String(username).toLowerCase()
+  );
+
+  // Standing in a base is the visit. POST /api/visit is idempotent per visitor
+  // per host per day (unique index on the Visit model), so calling it on mount is
+  // safe and a refresh cannot inflate anyone's count. Signed-out visitors are
+  // ignored by the server rather than counted as ghosts.
+  const recordVisit = useCallback(async ({ announce } = {}) => {
+    if (!username) return;
+    try {
+      const response = await fetch('/api/visit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ username }),
+      });
+      const body = await response.json().catch(() => ({}));
+
+      if (!response.ok || !body.data) {
+        if (announce) setVisitNote("Sign in to knock on someone's door.");
+        return;
+      }
+
+      setVisits(body.data.visits);
+      if (announce) {
+        setVisitNote(
+          body.data.isSelf
+            ? 'This is your own base.'
+            : body.data.firstVisitToday
+              ? "Knock sent — they'll know you stopped by."
+              : "You've already knocked here today."
+        );
+      }
+    } catch {
+      if (announce) setVisitNote('Could not reach that base.');
+    }
+  }, [username]);
+
+  useEffect(() => {
+    if (username) recordVisit();
+  }, [username, recordVisit]);
+
+  // Every number here is backed by a real field. Nothing is a placeholder.
   const profile = {
-    username:    username || '',
-    displayName: (username || 'USER').toUpperCase(),
-    avatar:      null,
-    bio:         'Exploring creativity, technology, and human connection through immersive experiences across events, art, and play.',
-    moments:     300,
-    connections: 1279,
-    followers:   '29.7K',
-    xpRank:      'NOVICE EXPLORER',
-    xpCurrent:   44,
-    xpMax:       100,
+    username:    (owner && owner.username) || username || '',
+    displayName: ((owner && owner.username) || username || 'USER').toUpperCase(),
+    avatar:      (owner && owner.profile_picture) || null,
+    bio:         (owner && owner.about) || 'Exploring creativity, technology, and human connection through immersive experiences across events, art, and play.',
+    moments:     liveVisits ? liveVisits.total : 0,          // times someone stood here
+    connections: liveVisits ? liveVisits.unique : 0,         // distinct people who have
+    followers:   (owner && owner.number_of_followers) || 0,
+    xpRank:      ((owner && owner.level) || 'Novice').toUpperCase(),
+    xpCurrent:   xpBar(owner),
+    xpMax:       XP_BLOCK,
     isPublic:    true,
   };
 
   // A base that doesn't exist is a 404, whatever the connection state.
-  if (lookupState === USER_LOOKUP.MISSING) {
+  // /api/homes is authoritative when it answers; the older /api/user lookup still
+  // decides when /api/homes could not answer at all, which preserves the existing
+  // guard on a backend deployed before /api/homes existed.
+  const missing = baseStatus === BASE_LOOKUP.MISSING
+    || (lookupState === USER_LOOKUP.MISSING && baseStatus !== BASE_LOOKUP.READY);
+
+  if (missing) {
     return (
       <NotFoundScreen
         documentTitle="No base by that name — Lucid Jungles"
@@ -820,6 +895,31 @@ export default function UserBase() {
 
       {/* Divider */}
       <div style={{ height: 1, background: '#ABD49E', flexShrink: 0 }}/>
+
+      {/* ── Base status band ──────────────────────────────────────────────────
+          Identity, vitals and how inhabited this base is. This is the piece that
+          makes a base read as a *place* rather than a page — see
+          LUCID_JUNGLES_COMPETITIVE_ANALYSIS.md §7 #1, #4 and #5. */}
+      <div style={{ flexShrink: 0, background: '#151413', borderBottom: '1px solid rgba(171,212,158,0.2)', padding: '8px 16px 10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 7 }}>
+          <span style={{ fontFamily: 'monospace', fontSize: 10, letterSpacing: '0.1em', color: '#ABD49E' }}>
+            {isSelf ? 'YOUR BASE' : `VISITING ${profile.displayName}'S BASE`}
+          </span>
+          {!isSelf && (
+            <button onClick={() => recordVisit({ announce: true })} aria-label="Knock on this base" style={{
+              background: 'transparent', border: '1px solid #ABD49E', color: '#ABD49E',
+              fontFamily: 'monospace', fontSize: 9, letterSpacing: '0.12em',
+              padding: '4px 10px', cursor: 'pointer',
+            }}>KNOCK</button>
+          )}
+        </div>
+
+        <VitalBars vitals={deriveVitals(owner, liveVisits)}/>
+
+        <p style={{ fontFamily: 'monospace', fontSize: 9, marginTop: 7, minHeight: 12, color: 'rgba(171,212,158,0.6)' }}>
+          {visitNote || (liveVisits ? `${liveVisits.total} VISITS · ${liveVisits.unique} VISITORS` : '')}
+        </p>
+      </div>
 
       {/* Content — flex-1, position:relative so QR/Smiley are viewport-anchored */}
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>

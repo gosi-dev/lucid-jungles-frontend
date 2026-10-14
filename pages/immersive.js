@@ -3,6 +3,7 @@ import Head from "next/head";
 import { useLottie } from "lottie-react";
 import { motion, AnimatePresence } from "framer-motion";
 import rotatePhoneAnimation from "../data/rotatePhoneAnimation";
+import { useHideBottomNav } from "../hooks/useHideBottomNav";
 
 /* ── Tapscreen: Lottie "rotate phone" modal ── */
 const tapscreenVariants = {
@@ -265,6 +266,8 @@ Webgl.displayName = "Webgl";
 /* ── Page wrapper: client-only rendering ── */
 export default function ImmersivePage() {
   const [mounted, setMounted] = useState(false);
+  // Full-screen WebGL experience — the fixed BottomNav would sit on top of it.
+  useHideBottomNav(true);
   useEffect(() => setMounted(true), []);
 
   if (!mounted) return null;

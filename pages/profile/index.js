@@ -1,5 +1,5 @@
 // pages/profile/index.js — DREAMING: Personal jungle map
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import Link from 'next/link';
@@ -7,9 +7,9 @@ import { useSelector } from 'react-redux';
 import { useLayout } from '../../context/LayoutContext';
 import { useHideBottomNav } from '../../hooks/useHideBottomNav';
 import { generateMapElements, getEntitySizing } from '../../data/jungleMapElements';
-import { MOCK_MAP_ENTITIES } from '../../data/mockMapData';
 import SearchBar from '../../components/SearchBar';
 import Drawer from '../../components/Drawer';
+import JungleMapCanvas from '../../components/JungleMapCanvas';
 import {
   KuraNode, MojNode, CCStudiosNode, DojoNode
 } from '../../components/MapNodes';
@@ -22,6 +22,14 @@ const PLATFORM_BASES = [
   { id: 'ccstudios',   type: 'building', gridX: 8,   gridY: 3,   name: 'CAPPUCCINO STUDIOX', route: '/ccstudios', desc: 'Creative studio & community space.' },
   { id: 'luciddojo',   type: 'building', gridX: 14,  gridY: -8,  name: 'LUCID DOJO',         route: '/dojo',      desc: 'The jungle dojo. Train, compete, level up.' },
   { id: 'lucidhigh',   type: 'building', gridX: -6,  gridY: 13,  name: 'LUCID HIGH CLUB',    route: '/highclub',  desc: 'The elevated lounge of Lucid Jungles.' },
+];
+
+// ── PERMANENT WORLD RESIDENTS ──────────────────────────────────────────────
+// World seed, not mock data: the platform's own bases are always on the map even before
+// an account has a MapPosition row. bonzo is the founder's base and the canonical first
+// place to visit. A live MapPosition for the same handle always wins (see connectionUsers).
+const WORLD_USERS = [
+  { id: 'bonzo', username: 'bonzo', name: 'BONZO', gridX: -3, gridY: 7 },
 ];
 
 const IMAGE_PATHS = {
@@ -77,7 +85,7 @@ function ConnectionDropdown({ conn, onClose }) {
         <div style={{ backgroundColor: '#ABD49E', color: '#151413', height: 40, display: 'flex', alignItems: 'center', padding: '0 16px', fontWeight: 700, fontSize: 13, letterSpacing: 1 }}>{conn.name}</div>
         {[
           { label: 'VIEW PROFILE', action: () => { onClose(); } },
-          { label: 'VISIT BASE', action: () => { router.push(`/${conn.id}`); onClose(); } },
+          { label: 'VISIT BASE', action: () => { router.push(`/${conn.username || conn.id}`); onClose(); } },
           { label: 'CANCEL', action: onClose },
         ].map(item => (
           <button key={item.label} onClick={item.action}
@@ -95,7 +103,6 @@ export default function DreamingPage() {
   const router = useRouter();
   const { setActiveNav, drawerView, setDrawerView } = useLayout();
   const { username } = useSelector(state => state.registerSlice);
-  const mapContainerRef = useRef(null);
 
   useHideBottomNav(false);
   useEffect(() => { setActiveNav('DREAMING'); }, [setActiveNav]);
@@ -105,41 +112,39 @@ export default function DreamingPage() {
   const [selectedBuilding, setSelectedBuilding] = useState(null);
   const [selectedConnection, setSelectedConnection] = useState(null);
   const [mapLoading, setMapLoading] = useState(true);
-  const [mapData, setMapData] = useState({ connections: [], communities: [] });
+  const [mapData, setMapData] = useState({ users: [], communities: [] });
   const [kuraOpen, setKuraOpen] = useState(false);
 
-  // Fetch dynamic connections
+  // /api/map is the single source of positioned entities (backend src/routes/map.js).
+  // It returns { users, communities }; users carry their public handle so they are visitable.
   useEffect(() => {
     fetch('/api/map')
       .then(r => r.json())
       .then(result => {
-        if (result.success) {
-          setMapData({
-            connections: result.data.connections || [],
-            communities: result.data.communities || [],
-          });
-        } else {
-          const userEntities = MOCK_MAP_ENTITIES.filter(e => e.type === 'user' && e.id !== 'me');
-          setMapData({
-            connections: userEntities.map((e, i) => ({
-              id: e.id, name: e.name, status: i === 0 ? 'online' : 'away',
-              gridX: e.gridX, gridY: e.gridY, level: 'EXPLORER',
-            })),
-            communities: [],
-          });
-        }
+        const data = (result && result.data) || {};
+        setMapData({
+          users: data.users || [],
+          communities: data.communities || [],
+        });
       })
-      .catch(() => setMapData({ connections: [], communities: [] }))
+      .catch(() => setMapData({ users: [], communities: [] }))
       .finally(() => setMapLoading(false));
   }, []);
+
+  // Permanent residents merged with real positioned users, de-duplicated by handle so a
+  // live MapPosition always beats the seed entry.
+  const connectionUsers = useMemo(() => {
+    const seen = new Set(mapData.users.map(u => u.username || u.id));
+    return [...WORLD_USERS.filter(w => !seen.has(w.username)), ...mapData.users];
+  }, [mapData.users]);
 
   // All entities for map bounds + natural element generation
   const allEntities = useMemo(() => [
     { gridX: 0, gridY: 0, type: 'user' },
     ...PLATFORM_BASES.map(b => ({ gridX: b.gridX, gridY: b.gridY, type: 'building' })),
-    ...mapData.connections.map(c => ({ gridX: c.gridX, gridY: c.gridY, type: 'user' })),
+    ...connectionUsers.map(c => ({ gridX: c.gridX, gridY: c.gridY, type: 'user' })),
     ...mapData.communities.map(c => ({ gridX: c.gridX, gridY: c.gridY, type: 'community' })),
-  ], [mapData]);
+  ], [connectionUsers, mapData.communities]);
 
   const mapBounds = useMemo(() => {
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -184,16 +189,7 @@ export default function DreamingPage() {
   const getPos = (gridX, gridY) => ({ x: GRID_OFFSET + gridX * GRID_SIZE, y: GRID_OFFSET + gridY * GRID_SIZE });
 
   // Center on HOME after load
-  useEffect(() => {
-    if (!mapLoading && mapContainerRef.current) {
-      setTimeout(() => {
-        const el = mapContainerRef.current;
-        const { x, y } = getPos(0, 0);
-        el.scrollLeft = x - el.clientWidth / 2 + GRID_SIZE / 2;
-        el.scrollTop = y - el.clientHeight / 2 + GRID_SIZE / 2;
-      }, 100);
-    }
-  }, [mapLoading, GRID_OFFSET]);
+  // (JungleMapCanvas owns the camera and centres on (0,0) itself — see focusX/focusY.)
 
   // Drawer content
   const renderDrawerContent = () => {
@@ -211,8 +207,8 @@ export default function DreamingPage() {
     }
     const term = search.toLowerCase();
     const filtered = search.length
-      ? mapData.connections.filter(c => c.name.toLowerCase().includes(term))
-      : mapData.connections;
+      ? connectionUsers.filter(c => c.name.toLowerCase().includes(term))
+      : connectionUsers;
     return (
       <div>
         <div style={{ color: 'rgba(171,212,158,0.5)', fontSize: 11, letterSpacing: 1, marginBottom: 12 }}>CONNECTIONS ({filtered.length})</div>
@@ -253,7 +249,7 @@ export default function DreamingPage() {
         <link rel="preload" as="image" href="/jungle/Property%201=Rocks.svg" />
         <link rel="preload" as="image" href="/jungle/Property%201=Flowers.svg" />
       </Head>
-      <div style={{ position: 'relative', height: '100dvh', width: '100dvw', overflow: 'hidden', backgroundColor: '#0A2A0A' }}>
+      <div style={{ position: 'relative', height: '100dvh', width: '100dvw', overflow: 'hidden', backgroundColor: '#0A2A0A' }} className="bleed-nav">
 
         <SearchBar
           placeholder="Search connections, communities..."
@@ -261,15 +257,16 @@ export default function DreamingPage() {
           onChange={e => { setSearch(e.target.value); if (e.target.value.length > 0) setShowList(true); }}
         />
 
-        {/* Jungle map */}
-        <div
-          ref={mapContainerRef}
-          style={{
-            position: 'absolute', top: 0, left: 0, right: 0, bottom: 75,
-            overflow: 'auto', cursor: 'grab',
-            background: 'linear-gradient(135deg, #0A2A0A 0%, #1A472A 30%, #2D5A3D 70%, #3D6B4F 100%)',
-            scrollbarWidth: 'thin', scrollbarColor: '#ABD49E #151413',
-          }}
+        {/* Jungle map — a pan/zoom camera over a MAP_SIZE pixel canvas */}
+        <JungleMapCanvas
+          width={MAP_SIZE}
+          height={MAP_SIZE}
+          gridSize={GRID_SIZE}
+          offset={GRID_OFFSET}
+          focusX={0}
+          focusY={0}
+          bottomInset={75}
+          background="linear-gradient(135deg, #0A2A0A 0%, #1A472A 30%, #2D5A3D 70%, #3D6B4F 100%)"
         >
           <div style={{ position: 'relative', width: MAP_SIZE, height: MAP_SIZE, minWidth: MAP_SIZE, minHeight: MAP_SIZE }}>
 
@@ -292,7 +289,7 @@ export default function DreamingPage() {
                   />
                 );
               })}
-              {mapData.connections.map(conn => {
+              {connectionUsers.map(conn => {
                 const cpos = getPos(conn.gridX, conn.gridY);
                 return (
                   <line key={`path-conn-${conn.id}`}
@@ -360,7 +357,7 @@ export default function DreamingPage() {
             })}
 
             {/* ── DYNAMIC USER CONNECTIONS ─────────────────────────────── */}
-            {mapData.connections.map(conn => {
+            {connectionUsers.map(conn => {
               const { x, y } = getPos(conn.gridX, conn.gridY);
               return (
                 <div key={conn.id} onClick={() => setSelectedConnection(conn)}
@@ -390,7 +387,7 @@ export default function DreamingPage() {
               );
             })}
           </div>
-        </div>
+        </JungleMapCanvas>
 
         {/* Building popup */}
         {selectedBuilding && <BuildingPopup base={selectedBuilding} onClose={() => setSelectedBuilding(null)} />}
@@ -433,12 +430,6 @@ export default function DreamingPage() {
           {renderDrawerContent()}
         </Drawer>
       </div>
-
-      <style jsx global>{`
-        .jungle-map-container::-webkit-scrollbar { width: 8px; height: 8px; }
-        .jungle-map-container::-webkit-scrollbar-track { background: #151413; }
-        .jungle-map-container::-webkit-scrollbar-thumb { background: #ABD49E; border-radius: 4px; }
-      `}</style>
     </>
   );
 }

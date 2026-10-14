@@ -3,26 +3,48 @@ import Link from "next/link";
 import { useRouter } from "next/router";
 import { useLayout } from "../context/LayoutContext";
 import { useEffect } from "react";
+import { Map, Sparkles, Dumbbell, Store, User } from "lucide-react";
+
+// Five destinations, ported from CONSOLIDATED/client/components/BottomNav.jsx.
+// Mounted once in pages/_app.js so the bar exists on every route; routes that need
+// the full viewport opt out with useHideBottomNav(true).
+const NAV_ITEMS = [
+  { name: "WAKING", icon: Map, href: "/" },
+  { name: "DREAMING", icon: Sparkles, href: "/profile" },
+  { name: "DOJO", icon: Dumbbell, href: "/dojo" },
+  { name: "STORE", icon: Store, href: "/store" },
+  { name: "YOU", icon: User, href: "/you" },
+];
+
+// First matching prefix wins when deriving the active tab from the route.
+const ACTIVE_BY_PREFIX = [
+  ["/dojo", "DOJO"],
+  ["/store", "STORE"],
+  ["/cart", "STORE"],
+  ["/orders", "STORE"],
+  ["/profile", "DREAMING"],
+  ["/jungle", "DREAMING"],
+  ["/you", "YOU"],
+  ["/tkxts", "YOU"],
+];
 
 export default function BottomNav() {
   const router = useRouter();
   const { showBottomNav, activeNav, setActiveNav } = useLayout();
 
-  const navItems = [
-    { name: "WAKING", href: "/" },
-    { name: "DREAMING", href: "/profile" },
-    { name: "YOU", href: "/you" },
-  ];
-
   useEffect(() => {
     const path = router.pathname;
     if (path === "/") {
       setActiveNav("WAKING");
-    } else if (path.startsWith("/profile")) {
-      setActiveNav("DREAMING");
-    } else if (path.startsWith("/you") || path.startsWith("/tkxts")) {
-      setActiveNav("YOU");
+      return;
     }
+    // A public base (/[username]) is a jungle/world view, not a nav destination.
+    if (path === "/[username]") {
+      setActiveNav("DREAMING");
+      return;
+    }
+    const hit = ACTIVE_BY_PREFIX.find(([prefix]) => path.startsWith(prefix));
+    if (hit) setActiveNav(hit[1]);
   }, [router.pathname, setActiveNav]);
 
   if (!showBottomNav) return null;
@@ -36,32 +58,26 @@ export default function BottomNav() {
         width: "100%",
         zIndex: 9999,
         backgroundColor: "#151413",
-        border: "1px solid #ABD49E",
+        borderTop: "1px solid #ABD49E",
       }}
-      className="flex justify-between items-center h-[75px] shadow-lg"
+      className="flex justify-between items-center h-[75px] shadow-lg pb-safe"
     >
-      {navItems.map((item, index) => {
+      {NAV_ITEMS.map((item, index) => {
         const active = activeNav === item.name;
+        const Icon = item.icon;
         return (
           <Link
             key={item.name}
             href={item.href}
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              justifyContent: "center",
-              width: "33.333%",
-              height: "100%",
-              backgroundColor: active ? "#ABD49E" : "transparent",
-              color: active ? "#151413" : "#ABD49E",
-              borderRight: index < navItems.length - 1 ? "1px solid #ABD49E" : "none",
-              textDecoration: "none",
-              transition: "background-color 0.1s",
-            }}
+            aria-current={active ? "page" : undefined}
+            className={`flex flex-col items-center justify-center w-1/5 h-full transition-colors duration-100 ${
+              active ? "bg-[#ABD49E] text-[#151413]" : "text-[#ABD49E] hover:bg-[#ABD49E]/20"
+            } ${index < NAV_ITEMS.length - 1 ? "border-r border-[#ABD49E]/30" : ""}`}
+            style={{ textDecoration: "none" }}
             onClick={() => setActiveNav(item.name)}
           >
-            <span style={{ fontSize: 12, fontWeight: 600, letterSpacing: 1 }}>{item.name}</span>
+            <Icon size={18} className="mb-1" />
+            <span className="text-[8px] font-medium tracking-widest">{item.name}</span>
           </Link>
         );
       })}

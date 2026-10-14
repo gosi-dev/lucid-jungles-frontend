@@ -181,7 +181,7 @@ export default function Landing() {
       <Head>
         <title>Lucid Jungles — Jungle Map</title>
       </Head>
-      <main className="relative w-[100dvw] h-[100dvh] font-CodeSaver" style={{ backgroundColor: "#0A2A0A" }}>
+      <main className="relative w-[100dvw] h-[100dvh] font-CodeSaver bleed-nav" style={{ backgroundColor: "#0A2A0A" }}>
         <NavBar audioControls={false} />
 
         {/* Scrollable jungle map container */}

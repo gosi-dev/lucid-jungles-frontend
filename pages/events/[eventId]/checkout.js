@@ -6,6 +6,26 @@ import { ArrowLeft } from 'lucide-react';
 import { useHideBottomNav } from '../../../hooks/useHideBottomNav';
 import { useSelector } from 'react-redux';
 
+// Flutterwave's inline SDK is fetched on demand, so no third-party script is
+// loaded until a user actually commits to paying.
+const FLW_SDK_URL = 'https://checkout.flutterwave.com/v3.js';
+let flwLoader = null;
+
+function loadFlutterwave() {
+  if (typeof window === 'undefined') return Promise.reject(new Error('No browser context'));
+  if (window.FlutterwaveCheckout) return Promise.resolve();
+  if (!flwLoader) {
+    flwLoader = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = FLW_SDK_URL;
+      script.onload = () => resolve();
+      script.onerror = () => { flwLoader = null; reject(new Error('Could not reach the payment provider')); };
+      document.body.appendChild(script);
+    });
+  }
+  return flwLoader;
+}
+
 export default function Checkout() {
   const router = useRouter();
   const { eventId, selections: selectionsParam } = router.query;
@@ -51,14 +71,50 @@ export default function Checkout() {
     try {
       const body = { eventId, selections, guestInfo: form };
       const res = await fetch('/api/tickets/buy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(body) });
-      if (res.ok) {
-        router.push('/events/' + eventId + '/payment-success');
-      } else {
-        const err = await res.json();
-        alert(err.message || 'Purchase failed');
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        alert(data.error || data.message || 'Purchase failed');
+        return;
       }
-    } catch {
-      alert('Purchase failed. Please try again.');
+
+      // Free tickets are already confirmed server-side.
+      if (data.confirmed) {
+        router.push('/events/' + eventId + '/ticket-confirmed');
+        return;
+      }
+
+      // Paid tickets are deliberately left `pending` until Flutterwave verifies
+      // the transaction, so hand off to the payment provider now.
+      if (data.paymentRequired && data.flw_payload) {
+        const p = data.flw_payload;
+        await loadFlutterwave();
+        window.FlutterwaveCheckout({
+          public_key: process.env.NEXT_PUBLIC_FLW_PUBLIC_KEY,
+          tx_ref: p.tx_ref,
+          amount: p.amount,
+          currency: p.currency,
+          customer: {
+            email: (p.customer && p.customer.email) || form.email,
+            name: (p.customer && p.customer.name) || form.name,
+            phone_number: form.phone,
+          },
+          customizations: p.customizations,
+          callback: (response) => {
+            router.push(
+              '/events/' + eventId + '/ticket-confirmed' +
+              '?transaction_id=' + encodeURIComponent(response.transaction_id) +
+              '&tx_ref=' + encodeURIComponent(response.tx_ref)
+            );
+          },
+          onclose: () => {},
+        });
+        return;
+      }
+
+      alert('Unexpected response from checkout. Please try again.');
+    } catch (err) {
+      alert(err && err.message ? err.message : 'Purchase failed. Please try again.');
     } finally {
       setLoading(false);
     }

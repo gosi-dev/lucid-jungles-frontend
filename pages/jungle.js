@@ -155,7 +155,7 @@ export default function Landing() {
         <link rel="preload" as="image" href="/jungle/Property%201=Rocks.svg" />
         <link rel="preload" as="image" href="/jungle/Property%201=Flowers.svg" />
       </Head>
-      <main className="relative w-[100dvw] h-[100dvh] font-CodeSaver" style={{ backgroundColor: "#0A2A0A" }}>
+      <main className="relative w-[100dvw] h-[100dvh] font-CodeSaver bleed-nav" style={{ backgroundColor: "#0A2A0A" }}>
         <NavBar audioControls={false} />
 
         {/* Scrollable jungle map container */}

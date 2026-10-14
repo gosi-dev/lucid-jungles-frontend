@@ -20,7 +20,12 @@ export default function WorldPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  const all = [...positions.users, ...positions.communities];
+  // The API returns the two sets separately and each entity carries `id`, `name` and
+  // (for users) `username`; tag the type here so the grid can render both.
+  const all = [
+    ...positions.users.map((u) => ({ ...u, entityType: 'User' })),
+    ...positions.communities.map((c) => ({ ...c, entityType: 'Community' })),
+  ];
   const maxX = all.reduce((m, p) => Math.max(m, p.gridX || 0), 0);
   const maxY = all.reduce((m, p) => Math.max(m, p.gridY || 0), 0);
   const cols = Math.max(maxX + 1, 1);
@@ -73,7 +78,11 @@ export default function WorldPage() {
                 return (
                   <Link
                     key={idx}
-                    href={isCommunity ? `/communities/${node.entityId}` : `/u/${node.entityName}`}
+                    href={
+                      isCommunity
+                        ? `/communities/${node.id}`
+                        : `/${node.username || node.id}`
+                    }
                     style={{
                       width: CELL,
                       height: CELL,
@@ -91,9 +100,9 @@ export default function WorldPage() {
                       textDecoration: 'none',
                       padding: 2,
                     }}
-                    title={node.entityName}
+                    title={node.name}
                   >
-                    <span style={{ fontWeight: 700 }}>{node.entityName}</span>
+                    <span style={{ fontWeight: 700 }}>{node.name}</span>
                     {here.length > 1 ? <span style={{ opacity: 0.6 }}>+{here.length - 1}</span> : null}
                   </Link>
                 );

@@ -23,6 +23,20 @@ body {
 #__next {
   min-height: 100vh;
   display: block;
+  /* Reserve room for the fixed BottomNav (mounted once in pages/_app.js) so no
+     page's content is ever trapped underneath it. */
+  padding-bottom: calc(75px + env(safe-area-inset-bottom, 0px));
+}
+
+/* Full-bleed routes (jungle maps, immersive) draw edge-to-edge and let the fixed
+   BottomNav float over their bottom edge, so they cancel the shell's nav padding. */
+.bleed-nav {
+  margin-bottom: calc(-75px - env(safe-area-inset-bottom, 0px));
+}
+
+/* Safe-area inset for the fixed BottomNav (iPhone home indicator). */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 /* Headings use CodeSaver */
