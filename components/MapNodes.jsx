@@ -72,7 +72,7 @@ export function KuraNode({ data, selected }) {
       <div
         className={`cursor-pointer transition-all duration-200 w-[100px] h-[100px] ${
           selected
-            ? "border-blue-500 bg-[#FFF212]"
+            ? "border-[#151413] bg-[#FFF212]"
             : "border-[#FFF212] bg-[#FFF212] hover:border-gray-400"
         }`}
         onClick={data?.onClick}
@@ -217,7 +217,7 @@ export function BonzoNode({ data, selected }) {
       hoverCardClassName="!z-[999] cursor-pointer text-sm md:text-xl text-primary -top-[20%] left-[80%] bg-secondary"
       onHoverCardClick={() => null}
     >
-      <div className={`cursor-pointer transition-all duration-200 w-[100px] h-[100px] ${selected ? "border-blue-500 bg-[#FFF212]" : "border-[#FFF212] bg-[#FFF212] hover:border-gray-400"}`}>
+      <div className={`cursor-pointer transition-all duration-200 w-[100px] h-[100px] ${selected ? "border-[#151413] bg-[#FFF212]" : "border-[#FFF212] bg-[#FFF212] hover:border-gray-400"}`}>
         <img src="/Bonzo.svg" alt="KURA" className="w-full h-full" />
         <aside className="absolute !z-[999] -top-2 left-[110%] max-w-[500px] cursor-pointer text-xl text-primary text-center w-max bg-primary p-0.5 border border-secondary">
           <p className="w-full h-full py-3 px-6 flex items-center justify-center bg-secondary">
@@ -265,7 +265,7 @@ export function MideNode({ data, selected }) {
         hoverCardClassName="!z-[999] cursor-pointer text-xl text-primary -bottom-[20%] left-[80%] bg-secondary"
         onHoverCardClick={() => null}
       >
-        <div className={`cursor-pointer transition-all duration-200 w-[100px] h-[100px] ${selected ? "border-blue-500 bg-[#FFF212]" : "border-[#FFF212] bg-[#FFF212] hover:border-gray-400"}`}>
+        <div className={`cursor-pointer transition-all duration-200 w-[100px] h-[100px] ${selected ? "border-[#151413] bg-[#FFF212]" : "border-[#FFF212] bg-[#FFF212] hover:border-gray-400"}`}>
           <img src="/Mide.png" alt="KURA" className="w-full h-full" />
           <aside className="absolute !z-[999] -top-2 right-[110%] max-w-[500px] cursor-pointer text-xl text-secondary text-center w-max bg-secondary p-0.5 border border-primary">
             <p className="w-full h-full py-3 px-6 flex items-center justify-center bg-primary">
@@ -283,13 +283,13 @@ export function CustomMapNode({ data, selected }) {
   return (
     <div
       className={`relative !z-[1001] px-2 py-2 shadow-md border-2 cursor-pointer transition-all duration-200 w-[100px] h-[100px] ${
-        selected ? "border-blue-500 bg-[#FFF212]" : "border-[#FFF212] bg-[#FFF212] hover:border-gray-400"
+        selected ? "border-[#151413] bg-[#FFF212]" : "border-[#FFF212] bg-[#FFF212] hover:border-gray-400"
       }`}
       onClick={data?.onClick}
     >
       <div className="flex items-center">
         <div className="ml-2">
-          <div className="text-sm font-bold text-[#02A1FD]">{data?.title}</div>
+          <div className="text-sm font-bold text-[#151413]">{data?.title}</div>
           <div className="text-gray-500 text-xs">{data?.description}</div>
         </div>
       </div>

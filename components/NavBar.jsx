@@ -18,7 +18,7 @@ export default function NavBar({ audioControls = false, theme = "default" }) {
         audioControls
           ? moj
             ? "bg-[linear-gradient(to_bottom,_#151413_0%,_#151413_40%,_#15141300_100%)]"
-            : "bg-[linear-gradient(to_bottom,_#02a1fd_0%,_#02a1fd_40%,_#02a1fd00_100%)]"
+            : "bg-[linear-gradient(to_bottom,_#151413_0%,_#151413_40%,_#15141300_100%)]"
           : ""
       }`}
     >

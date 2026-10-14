@@ -15,7 +15,7 @@ body {
   height: 100%;
   width: 100%;
   font-family: "Averia Sans Libre", "Inter", sans-serif;
-  background-color: #02a1fd;
+  background-color: #151413;
   color: #ffffff;
   overflow-x: hidden;
 }
@@ -72,8 +72,8 @@ h1, h2, h3, h4, h5, h6 {
 
 .modal__button {
   padding: 0.5rem 1rem;
-  background: #02a1fd;
-  color: white;
+  background: #ABD49E;
+  color: #151413;
   cursor: pointer;
   border: none;
   margin-top: 1rem;
@@ -85,7 +85,7 @@ h1, h2, h3, h4, h5, h6 {
   left: 0;
   width: 100vw;
   height: 100vh;
-  background: #02a1fd;
+  background: #151413;
   z-index: 60;
   display: flex;
   align-items: center;

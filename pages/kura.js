@@ -282,7 +282,7 @@ export default function Kura() {
             gap={150}
             size={5}
             color="#FFFFFF"
-            className="bg-[#02a1fd]"
+            className="bg-[#ABD49E]"
           />
         </ReactFlow>
 
