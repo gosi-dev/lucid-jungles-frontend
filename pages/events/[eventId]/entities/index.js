@@ -19,7 +19,12 @@ export default function EntitiesPage() {
   useHideBottomNav(true);
 
   useEffect(() => {
-    if (tabParam && TABS.includes(tabParam)) setActiveTab(tabParam);
+    if (!tabParam) return;
+    // Accept both spellings — `events/[eventId].js` links here with ?tab=TALENTS while the
+    // tab labels are singular. Normalising keeps the two in step.
+    const wanted = String(tabParam).toUpperCase();
+    const match = TABS.find(t => t === wanted || t + 'S' === wanted);
+    if (match) setActiveTab(match);
   }, [tabParam]);
 
   useEffect(() => {
