@@ -1,0 +1,62 @@
+# ─── dependencies ───
+node_modules/
+.pnp
+.pnp.js
+.yarn/
+
+# ─── next.js build output ───
+.next/
+out/
+build/
+dist/
+next-env.d.ts
+
+# ─── environment / secrets (never commit) ───
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env*.local
+
+# ─── credentials / keys ───
+credentials.json
+*.pem
+*.key
+service-account*.json
+
+# ─── testing ───
+coverage/
+.nyc_output/
+
+# ─── misc caches ───
+.cache/
+.turbo/
+.eslintcache
+*.tsbuildinfo
+.swc/
+
+# ─── editors / OS ───
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*~
+
+# ─── logs ───
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# ─── local dev artifacts ───
+public/uploads/
+public/tmp/
+tmp/
+
+# NOTE: *.bak / *.orig are deliberately TRACKED (not ignored).
+# They are the only surviving copies of some earlier page versions
+# (e.g. pages/[username].js.bak). Git history is the safety net for
+# removing them later — see reconciliation doc §10.

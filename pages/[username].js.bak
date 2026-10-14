@@ -1,0 +1,792 @@
+// pages/[username].js — User Base: Personal digital home
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { useRouter } from 'next/router';
+import Head from 'next/head';
+import { useSelector } from 'react-redux';
+import { useHideBottomNav } from '../hooks/useHideBottomNav';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ASSET PATHS
+// ─────────────────────────────────────────────────────────────────────────────
+const BASE = '/Frames/User-base/USER%20BASE';
+const DESK = `${BASE}/Dreamer%27s%20Desk%20assets`;
+
+const FRAMES = {
+  homeLocked:       `${BASE}/2.svg`,   // stranger viewing base (public: desk visible; private: desk hidden)
+  homeLockedAlt:    `${BASE}/3.svg`,   // alternate locked home view
+  requestPrivate:   `${BASE}/4.svg`,   // request sent, private profile
+  requestPublic:    `${BASE}/5.svg`,   // request sent, public profile (+ chat option)
+  chat:             `${BASE}/6.svg`,   // chat drawer open
+  connectedMobile:  `${BASE}/7.svg`,   // connected mobile view (desk visible)
+  connectedDesktop: `${BASE}/8.svg`,   // connected desktop view
+  events:           `${BASE}/9.svg`,   // events tab
+  store:            `${BASE}/10.svg`,  // store tab with items
+  storeEmpty:       `${BASE}/11.svg`,  // store tab empty
+};
+
+const DESK_ASSETS = {
+  table:     `${DESK}/Table.svg`,
+  chair:     `${DESK}/Chair.svg`,
+  computer:  `${DESK}/Computer.svg`,
+  journal:   `${DESK}/Journal%202.svg`,
+  slumbook:  `${DESK}/Slumbook.svg`,
+  portfolio: `${DESK}/Portfolio.svg`,
+  radio:     `${DESK}/Radio.svg`,
+  bookPile:  `${DESK}/Book%20Pile.svg`,
+  book2:     `${DESK}/Book-2.svg`,
+  boxes:     `${DESK}/Group%20of%20Boxes.svg`,
+  mailbox:   `${DESK}/Mailbox.svg`,
+};
+
+// Desk items shown when connected — each is clickable
+const DESK_ITEMS = [
+  { id: 'journal',   label: 'DREAM JOURNAL', asset: DESK_ASSETS.journal,   desc: 'Public journal entries',       size: { w: 80, h: 100 } },
+  { id: 'slumbook',  label: 'SLUM BOOK',     asset: DESK_ASSETS.slumbook,  desc: 'Write in their slum book',     size: { w: 75, h: 97 } },
+  { id: 'portfolio', label: 'PORTFOLIO',     asset: DESK_ASSETS.portfolio, desc: 'Visual work & creative output', size: { w: 74, h: 97 } },
+  { id: 'computer',  label: 'CONTENT',       asset: DESK_ASSETS.computer,  desc: 'Uploaded content & media',     size: { w: 70, h: 86 } },
+  { id: 'radio',     label: 'RADIO',         asset: DESK_ASSETS.radio,     desc: 'Their music & mixes',          size: { w: 75, h: 28 } },
+  { id: 'boxes',     label: 'MERCH',         asset: DESK_ASSETS.boxes,     desc: 'Merch inventory & drops',      size: { w: 28, h: 26 } },
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MAIN PAGE
+// ─────────────────────────────────────────────────────────────────────────────
+export default function UserBasePage() {
+  const router = useRouter();
+  const { username: profileSlug } = router.query;
+  const { username: currentUser } = useSelector(state => state.registerSlice);
+
+  useHideBottomNav(true);
+
+  // ── Core state ──────────────────────────────────────────────────────────────
+  const [profileData, setProfileData] = useState(null);
+  const [connectionStatus, setConnectionStatus] = useState('stranger'); // stranger | pending | connected | own
+  const [isPrivate, setIsPrivate] = useState(false);
+  const [activeTab, setActiveTab] = useState('home');
+  const [storeItems, setStoreItems] = useState([]);
+  const [eventsData, setEventsData] = useState([]);
+  const [isDesktop, setIsDesktop] = useState(false);
+
+  // ── Drawer state ─────────────────────────────────────────────────────────────
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatFullscreen, setChatFullscreen] = useState(false);
+  const [messages, setMessages] = useState([]);
+  const [msgInput, setMsgInput] = useState('');
+
+  // ── Modals ───────────────────────────────────────────────────────────────────
+  const [showMailboxModal, setShowMailboxModal] = useState(false);
+  const [mailboxMsg, setMailboxMsg] = useState('');
+  const [activeDesktopItem, setActiveDesktopItem] = useState(null); // desk item modal
+  const [connectSent, setConnectSent] = useState(false);
+
+  const msgEndRef = useRef(null);
+
+  // ── Responsive detection ─────────────────────────────────────────────────────
+  useEffect(() => {
+    const check = () => setIsDesktop(window.innerWidth >= 1024);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
+
+  // ── Data fetch ───────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!profileSlug) return;
+    // TODO: replace with real API call: GET /api/user/profile/:username
+    // For now using mock data
+    setProfileData({
+      username: profileSlug,
+      displayName: profileSlug.charAt(0).toUpperCase() + profileSlug.slice(1),
+      bio: 'Dreamer. Explorer. Jungle native.',
+      avatarUrl: null,
+      jungleLevel: 'WANDERER',
+      isPrivate: false,
+      followerCount: 42,
+      communityBase: null,
+    });
+    setIsPrivate(false);
+
+    // Determine connection status
+    if (currentUser === profileSlug) {
+      setConnectionStatus('own');
+    } else {
+      setConnectionStatus('stranger'); // TODO: fetch real relationship
+    }
+
+    // TODO: fetch real events + store
+    setStoreItems([]);
+    setEventsData([]);
+  }, [profileSlug, currentUser]);
+
+  // ── Scroll chat to bottom ────────────────────────────────────────────────────
+  useEffect(() => {
+    if (chatOpen) msgEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, chatOpen]);
+
+  // ── Actions ──────────────────────────────────────────────────────────────────
+  const handleConnect = useCallback(() => {
+    // TODO: POST /api/user/connect/:username
+    setConnectionStatus('pending');
+    setConnectSent(true);
+  }, []);
+
+  const handleMailboxSend = useCallback(() => {
+    if (!mailboxMsg.trim()) return;
+    // TODO: POST /api/user/message/:username { type: 'mailbox', body: mailboxMsg }
+    setShowMailboxModal(false);
+    setMailboxMsg('');
+  }, [mailboxMsg]);
+
+  const handleSendMessage = useCallback(() => {
+    if (!msgInput.trim()) return;
+    setMessages(prev => [...prev, { id: Date.now(), from: 'me', text: msgInput.trim(), time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
+    setMsgInput('');
+    // TODO: POST /api/messages { to: profileSlug, body: msgInput }
+  }, [msgInput]);
+
+  // ── Frame selection ──────────────────────────────────────────────────────────
+  const getActiveFrame = () => {
+    if (activeTab === 'events') return FRAMES.events;
+    if (activeTab === 'store') return storeItems.length === 0 ? FRAMES.storeEmpty : FRAMES.store;
+    // home tab
+    if (chatOpen) return FRAMES.chat;
+    if (connectionStatus === 'connected') return FRAMES.connectedMobile;
+    if (connectionStatus === 'pending') return isPrivate ? FRAMES.requestPrivate : FRAMES.requestPublic;
+    return FRAMES.homeLocked;
+  };
+
+  // ── Helpers ──────────────────────────────────────────────────────────────────
+  const canChat = connectionStatus === 'connected' || (connectionStatus === 'pending' && !isPrivate);
+  const deskVisible = connectionStatus === 'connected' || (connectionStatus === 'stranger' && !isPrivate);
+
+  if (!profileData) {
+    return (
+      <div style={{ height: '100dvh', backgroundColor: '#151413', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ color: '#ABD49E', fontFamily: 'CodeSaver, monospace', fontSize: 11, letterSpacing: 2 }}>ENTERING BASE...</div>
+      </div>
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // DESKTOP LAYOUT
+  // ─────────────────────────────────────────────────────────────────────────────
+  if (isDesktop) {
+    return (
+      <>
+        <Head><title>{profileData.displayName}'s Base — Lucid Jungles</title></Head>
+        <div style={{ height: '100dvh', width: '100vw', backgroundColor: '#151413', display: 'flex', overflow: 'hidden', fontFamily: 'CodeSaver, monospace' }}>
+
+          {/* LEFT SIDEBAR */}
+          <div style={{ width: 360, flexShrink: 0, borderRight: '1px solid rgba(171,212,158,0.2)', display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
+            {/* Back */}
+            <button onClick={() => router.back()} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '20px 24px 0', background: 'none', border: 'none', color: 'rgba(171,212,158,0.5)', cursor: 'pointer', fontSize: 11, letterSpacing: 1 }}>
+              ← BACK
+            </button>
+
+            {/* Avatar */}
+            <div style={{ padding: '24px 24px 0', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 80, height: 80, backgroundColor: '#FFF212', border: '3px solid #ABD49E', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32 }}>
+                {profileData.displayName.charAt(0)}
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ color: '#ABD49E', fontWeight: 700, fontSize: 15, letterSpacing: 1 }}>{profileData.displayName.toUpperCase()}</div>
+                <div style={{ color: 'rgba(171,212,158,0.5)', fontSize: 10, letterSpacing: 2, marginTop: 4 }}>{profileData.jungleLevel}</div>
+              </div>
+              {profileData.bio && (
+                <div style={{ color: 'rgba(171,212,158,0.7)', fontSize: 12, textAlign: 'center', lineHeight: 1.6, padding: '0 8px' }}>{profileData.bio}</div>
+              )}
+            </div>
+
+            {/* Divider */}
+            <div style={{ margin: '20px 24px', borderTop: '1px solid rgba(171,212,158,0.15)' }} />
+
+            {/* Connection actions */}
+            <div style={{ padding: '0 24px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {connectionStatus === 'own' && (
+                <button onClick={() => router.push('/you')} style={btnStyle('#151413', '#ABD49E')}>MANAGE YOUR BASE</button>
+              )}
+              {connectionStatus === 'stranger' && (
+                <>
+                  <button onClick={handleConnect} style={btnStyle('#ABD49E', '#151413')}>CONNECT</button>
+                  <button onClick={() => setShowMailboxModal(true)} style={btnStyle('#151413', '#ABD49E')}>✉ SEND MAILBOX MESSAGE</button>
+                </>
+              )}
+              {connectionStatus === 'pending' && (
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <div style={pillStyle}>REQUEST SENT</div>
+                  {!isPrivate && (
+                    <button onClick={() => setChatOpen(true)} style={{ background: 'none', border: '1px solid #ABD49E', color: '#ABD49E', padding: '8px 14px', cursor: 'pointer', fontSize: 12, letterSpacing: 1 }}>✉</button>
+                  )}
+                </div>
+              )}
+              {connectionStatus === 'connected' && (
+                <button onClick={() => setChatOpen(true)} style={btnStyle('#ABD49E', '#151413')}>✉ MESSAGE</button>
+              )}
+            </div>
+
+            {/* Divider */}
+            <div style={{ margin: '20px 24px', borderTop: '1px solid rgba(171,212,158,0.15)' }} />
+
+            {/* Tabs */}
+            <div style={{ padding: '0 24px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+              {['home', 'events', 'store'].map(tab => (
+                <button key={tab} onClick={() => setActiveTab(tab)}
+                  style={{ textAlign: 'left', padding: '12px 16px', background: activeTab === tab ? 'rgba(171,212,158,0.1)' : 'none', border: activeTab === tab ? '1px solid rgba(171,212,158,0.3)' : '1px solid transparent', color: activeTab === tab ? '#ABD49E' : 'rgba(171,212,158,0.4)', cursor: 'pointer', fontSize: 11, letterSpacing: 2, fontFamily: 'CodeSaver, monospace', textTransform: 'uppercase' }}>
+                  {tab === 'home' ? '⌂ HOME' : tab === 'events' ? '◈ EVENTS' : '◻ STORE'}
+                </button>
+              ))}
+            </div>
+
+            {/* Community base link */}
+            {profileData.communityBase && (
+              <>
+                <div style={{ margin: '20px 24px', borderTop: '1px solid rgba(171,212,158,0.15)' }} />
+                <div style={{ padding: '0 24px 24px' }}>
+                  <button onClick={() => router.push(`/fanbase/${profileData.communityBase.id}`)} style={{ ...btnStyle('#151413', '#8B5CF6'), borderColor: '#8B5CF6' }}>
+                    ⬡ {profileData.communityBase.name}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* RIGHT MAIN AREA */}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            {activeTab === 'home' && (
+              <DesktopHomeView
+                deskVisible={deskVisible}
+                connectionStatus={connectionStatus}
+                isPrivate={isPrivate}
+                onMailbox={() => setShowMailboxModal(true)}
+                onConnect={handleConnect}
+                activeItem={activeDesktopItem}
+                onItemClick={setActiveDesktopItem}
+                onItemClose={() => setActiveDesktopItem(null)}
+                chatOpen={chatOpen}
+                onChatClose={() => setChatOpen(false)}
+                messages={messages}
+                msgInput={msgInput}
+                onMsgChange={e => setMsgInput(e.target.value)}
+                onMsgSend={handleSendMessage}
+                msgEndRef={msgEndRef}
+                profileData={profileData}
+              />
+            )}
+            {activeTab === 'events' && <EventsView events={eventsData} />}
+            {activeTab === 'store' && <StoreView items={storeItems} />}
+          </div>
+        </div>
+
+        {/* Mailbox modal */}
+        {showMailboxModal && <MailboxModal onClose={() => setShowMailboxModal(false)} value={mailboxMsg} onChange={e => setMailboxMsg(e.target.value)} onSend={handleMailboxSend} displayName={profileData.displayName} />}
+      </>
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // MOBILE LAYOUT
+  // ─────────────────────────────────────────────────────────────────────────────
+  const activeFrame = getActiveFrame();
+
+  return (
+    <>
+      <Head>
+        <title>{profileData.displayName}'s Base — Lucid Jungles</title>
+        <link rel="preload" as="image" href={FRAMES.homeLocked} />
+        {connectionStatus !== 'stranger' && <link rel="preload" as="image" href={FRAMES.connectedMobile} />}
+      </Head>
+
+      <div style={{ position: 'relative', height: '100dvh', width: '100vw', overflow: 'hidden', backgroundColor: '#151413' }}>
+
+        {/* CHAT FULLSCREEN — replaces everything */}
+        {chatFullscreen && (
+          <FullscreenChat
+            messages={messages}
+            msgInput={msgInput}
+            onChange={e => setMsgInput(e.target.value)}
+            onSend={handleSendMessage}
+            onClose={() => setChatFullscreen(false)}
+            msgEndRef={msgEndRef}
+            profileData={profileData}
+          />
+        )}
+
+        {!chatFullscreen && (
+          <>
+            {/* SVG PLANE */}
+            <div style={{ position: 'absolute', inset: 0 }}>
+              <img
+                src={activeFrame}
+                alt=""
+                style={{ width: '100%', height: '100%', objectFit: 'contain', objectPosition: 'top center', display: 'block' }}
+                draggable={false}
+              />
+            </div>
+
+            {/* OVERLAY GRADIENT — top and bottom fade for UI clarity */}
+            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 120, background: 'linear-gradient(to bottom, rgba(21,20,19,0.85) 0%, transparent 100%)', pointerEvents: 'none', zIndex: 10 }} />
+            <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 100, background: 'linear-gradient(to top, rgba(21,20,19,0.95) 0%, transparent 100%)', pointerEvents: 'none', zIndex: 10 }} />
+
+            {/* HEADER */}
+            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 20, padding: '16px 16px 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <button onClick={() => router.back()} style={{ background: 'none', border: 'none', color: '#ABD49E', fontSize: 13, cursor: 'pointer', fontFamily: 'CodeSaver, monospace', letterSpacing: 1, padding: '6px 0' }}>
+                ← BACK
+              </button>
+              <div style={{ color: '#ABD49E', fontSize: 11, fontFamily: 'CodeSaver, monospace', letterSpacing: 2, fontWeight: 700 }}>
+                {profileData.displayName.toUpperCase()}'S BASE
+              </div>
+              <div style={{ width: 60 }} />
+            </div>
+
+            {/* TAB BAR */}
+            <div style={{ position: 'absolute', top: 52, left: 0, right: 0, zIndex: 20, display: 'flex', borderBottom: '1px solid rgba(171,212,158,0.15)' }}>
+              {['home', 'events', 'store'].map(tab => (
+                <button key={tab} onClick={() => { setActiveTab(tab); setDrawerOpen(false); setChatOpen(false); }}
+                  style={{ flex: 1, height: 36, background: 'none', border: 'none', borderBottom: activeTab === tab ? '2px solid #ABD49E' : '2px solid transparent', color: activeTab === tab ? '#ABD49E' : 'rgba(171,212,158,0.35)', cursor: 'pointer', fontSize: 10, letterSpacing: 2, fontFamily: 'CodeSaver, monospace', fontWeight: activeTab === tab ? 700 : 400 }}>
+                  {tab.toUpperCase()}
+                </button>
+              ))}
+            </div>
+
+            {/* MAILBOX HOTSPOT — center of scene (frame 412×917, mailbox ~center-ish) */}
+            {activeTab === 'home' && (connectionStatus === 'stranger' || (connectionStatus === 'pending' && isPrivate)) && (
+              <button
+                onClick={() => setShowMailboxModal(true)}
+                style={{ position: 'absolute', left: '40%', top: '42%', width: '20%', height: '12%', background: 'none', border: 'none', cursor: 'pointer', zIndex: 15 }}
+                aria-label="Send mailbox message"
+              />
+            )}
+
+            {/* DESK ITEM HOTSPOTS — only when connected on home tab (mobile) */}
+            {activeTab === 'home' && connectionStatus === 'connected' && DESK_ITEMS.map((item, i) => (
+              <button key={item.id} onClick={() => setActiveDesktopItem(item)}
+                style={{ position: 'absolute', zIndex: 15, background: 'none', border: 'none', cursor: 'pointer',
+                  // Approximate positions on 412×917 frame 7 (desk scene, centered)
+                  left: `${25 + (i % 3) * 17}%`, top: `${35 + Math.floor(i / 3) * 15}%`, width: '16%', height: '14%' }}
+                aria-label={item.label}
+              />
+            ))}
+
+            {/* BOTTOM DRAWER */}
+            <MobileDrawer
+              open={drawerOpen}
+              onToggle={() => setDrawerOpen(v => !v)}
+              chatOpen={chatOpen}
+              onChatOpen={() => { setChatOpen(true); setDrawerOpen(true); }}
+              onChatClose={() => setChatOpen(false)}
+              onChatFullscreen={() => setChatFullscreen(true)}
+              connectionStatus={connectionStatus}
+              isPrivate={isPrivate}
+              canChat={canChat}
+              profileData={profileData}
+              messages={messages}
+              msgInput={msgInput}
+              onMsgChange={e => setMsgInput(e.target.value)}
+              onMsgSend={handleSendMessage}
+              msgEndRef={msgEndRef}
+              onConnect={handleConnect}
+              onMailbox={() => setShowMailboxModal(true)}
+              connectSent={connectSent}
+              activeTab={activeTab}
+            />
+          </>
+        )}
+
+        {/* MAILBOX MODAL */}
+        {showMailboxModal && <MailboxModal onClose={() => setShowMailboxModal(false)} value={mailboxMsg} onChange={e => setMailboxMsg(e.target.value)} onSend={handleMailboxSend} displayName={profileData.displayName} />}
+
+        {/* DESK ITEM MODAL (mobile) */}
+        {activeDesktopItem && <DeskItemModal item={activeDesktopItem} onClose={() => setActiveDesktopItem(null)} ownerName={profileData.displayName} />}
+      </div>
+    </>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MOBILE DRAWER
+// ─────────────────────────────────────────────────────────────────────────────
+function MobileDrawer({ open, onToggle, chatOpen, onChatOpen, onChatClose, onChatFullscreen, connectionStatus, isPrivate, canChat, profileData, messages, msgInput, onMsgChange, onMsgSend, msgEndRef, onConnect, onMailbox, connectSent, activeTab }) {
+  const drawerHeight = chatOpen ? '72dvh' : '300px';
+
+  return (
+    <div style={{
+      position: 'fixed', bottom: 0, left: 0, right: 0,
+      height: drawerHeight, zIndex: 50,
+      transition: 'height 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
+      transform: open ? 'translateY(0)' : 'translateY(calc(100% - 52px))',
+      backgroundColor: '#151413',
+      borderTop: '1px solid rgba(171,212,158,0.25)',
+      display: 'flex', flexDirection: 'column',
+    }}>
+      {/* Handle */}
+      <div onClick={onToggle} style={{ height: 52, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0, gap: 10 }}>
+        <div style={{ width: 40, height: 3, backgroundColor: 'rgba(171,212,158,0.3)', borderRadius: 2 }} />
+        {!open && (
+          <span style={{ color: 'rgba(171,212,158,0.5)', fontSize: 10, fontFamily: 'CodeSaver, monospace', letterSpacing: 2 }}>
+            {chatOpen ? 'MESSAGES' : `${profileData?.displayName?.toUpperCase() || 'BASE'}`}
+          </span>
+        )}
+        <div style={{ width: 40, height: 3, backgroundColor: 'rgba(171,212,158,0.3)', borderRadius: 2 }} />
+      </div>
+
+      {/* Content */}
+      {open && !chatOpen && (
+        <div style={{ flex: 1, overflowY: 'auto', padding: '0 20px 20px' }}>
+          {/* Profile card */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, paddingBottom: 16, borderBottom: '1px solid rgba(171,212,158,0.1)', marginBottom: 16 }}>
+            <div style={{ width: 52, height: 52, backgroundColor: '#FFF212', border: '2px solid #ABD49E', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, fontWeight: 700, flexShrink: 0 }}>
+              {profileData?.displayName?.charAt(0) || '?'}
+            </div>
+            <div>
+              <div style={{ color: '#ABD49E', fontWeight: 700, fontSize: 14, fontFamily: 'CodeSaver, monospace', letterSpacing: 0.5 }}>{profileData?.displayName}</div>
+              <div style={{ color: 'rgba(171,212,158,0.5)', fontSize: 10, fontFamily: 'CodeSaver, monospace', letterSpacing: 2, marginTop: 3 }}>{profileData?.jungleLevel || 'DREAMER'}</div>
+            </div>
+          </div>
+
+          {profileData?.bio && (
+            <p style={{ color: 'rgba(171,212,158,0.65)', fontSize: 12, fontFamily: 'CodeSaver, monospace', lineHeight: 1.7, marginBottom: 16 }}>{profileData.bio}</p>
+          )}
+
+          {/* Action buttons */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {connectionStatus === 'stranger' && (
+              <>
+                <button onClick={onConnect} style={btnStyle('#ABD49E', '#151413')}>CONNECT</button>
+                <button onClick={onMailbox} style={btnStyle('#151413', '#ABD49E')}>✉ MAILBOX MESSAGE</button>
+              </>
+            )}
+            {connectionStatus === 'pending' && (
+              <div style={{ display: 'flex', gap: 10 }}>
+                <div style={{ ...pillStyle, flex: 1, textAlign: 'center' }}>REQUEST SENT</div>
+                {canChat && (
+                  <button onClick={onChatOpen} style={{ padding: '10px 18px', backgroundColor: '#151413', border: '1px solid #ABD49E', color: '#ABD49E', cursor: 'pointer', fontSize: 14, fontFamily: 'CodeSaver, monospace' }}>✉</button>
+                )}
+              </div>
+            )}
+            {connectionStatus === 'connected' && (
+              <button onClick={onChatOpen} style={btnStyle('#ABD49E', '#151413')}>✉ SEND MESSAGE</button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Chat view */}
+      {open && chatOpen && (
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          {/* Chat header */}
+          <div style={{ padding: '0 16px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid rgba(171,212,158,0.1)', flexShrink: 0 }}>
+            <button onClick={onChatClose} style={{ background: 'none', border: 'none', color: 'rgba(171,212,158,0.5)', cursor: 'pointer', fontSize: 11, fontFamily: 'CodeSaver, monospace', letterSpacing: 1 }}>← BACK</button>
+            <span style={{ color: '#ABD49E', fontSize: 11, fontFamily: 'CodeSaver, monospace', letterSpacing: 2 }}>DM · {profileData?.displayName?.toUpperCase()}</span>
+            <button onClick={onChatFullscreen} style={{ background: 'none', border: 'none', color: 'rgba(171,212,158,0.5)', cursor: 'pointer', fontSize: 14 }}>⤢</button>
+          </div>
+          {/* Messages */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {messages.length === 0 && (
+              <div style={{ color: 'rgba(171,212,158,0.3)', fontSize: 11, fontFamily: 'CodeSaver, monospace', textAlign: 'center', marginTop: 20, letterSpacing: 1 }}>
+                NO MESSAGES YET
+              </div>
+            )}
+            {messages.map(m => (
+              <div key={m.id} style={{ alignSelf: m.from === 'me' ? 'flex-end' : 'flex-start', maxWidth: '78%' }}>
+                <div style={{ backgroundColor: m.from === 'me' ? '#ABD49E' : 'rgba(171,212,158,0.1)', color: m.from === 'me' ? '#151413' : '#ABD49E', padding: '8px 12px', fontSize: 12, fontFamily: 'CodeSaver, monospace', lineHeight: 1.5 }}>
+                  {m.text}
+                </div>
+                <div style={{ color: 'rgba(171,212,158,0.3)', fontSize: 9, fontFamily: 'CodeSaver, monospace', marginTop: 3, textAlign: m.from === 'me' ? 'right' : 'left' }}>{m.time}</div>
+              </div>
+            ))}
+            <div ref={msgEndRef} />
+          </div>
+          {/* Input */}
+          <div style={{ padding: '10px 16px', borderTop: '1px solid rgba(171,212,158,0.15)', display: 'flex', gap: 8, flexShrink: 0 }}>
+            <input value={msgInput} onChange={onMsgChange} onKeyDown={e => e.key === 'Enter' && onMsgSend()}
+              placeholder="Type a message..."
+              style={{ flex: 1, backgroundColor: 'rgba(171,212,158,0.08)', border: '1px solid rgba(171,212,158,0.2)', color: '#ABD49E', padding: '10px 12px', fontSize: 12, fontFamily: 'CodeSaver, monospace', outline: 'none' }} />
+            <button onClick={onMsgSend} style={{ backgroundColor: '#ABD49E', border: 'none', color: '#151413', width: 44, cursor: 'pointer', fontSize: 16, fontWeight: 700 }}>›</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DESKTOP HOME VIEW
+// ─────────────────────────────────────────────────────────────────────────────
+function DesktopHomeView({ deskVisible, connectionStatus, isPrivate, onMailbox, onConnect, activeItem, onItemClick, onItemClose, chatOpen, onChatClose, messages, msgInput, onMsgChange, onMsgSend, msgEndRef, profileData }) {
+  if (chatOpen) {
+    return (
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <div style={{ padding: '20px 28px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid rgba(171,212,158,0.15)', flexShrink: 0 }}>
+          <button onClick={onChatClose} style={{ background: 'none', border: 'none', color: 'rgba(171,212,158,0.5)', cursor: 'pointer', fontSize: 11, fontFamily: 'CodeSaver, monospace', letterSpacing: 1 }}>← BACK TO BASE</button>
+          <span style={{ color: '#ABD49E', fontSize: 12, fontFamily: 'CodeSaver, monospace', letterSpacing: 2 }}>MESSAGES — {profileData?.displayName?.toUpperCase()}</span>
+          <div style={{ width: 100 }} />
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {messages.length === 0 && (
+            <div style={{ color: 'rgba(171,212,158,0.3)', fontSize: 12, fontFamily: 'CodeSaver, monospace', textAlign: 'center', marginTop: 40, letterSpacing: 1 }}>NO MESSAGES YET</div>
+          )}
+          {messages.map(m => (
+            <div key={m.id} style={{ alignSelf: m.from === 'me' ? 'flex-end' : 'flex-start', maxWidth: '60%' }}>
+              <div style={{ backgroundColor: m.from === 'me' ? '#ABD49E' : 'rgba(171,212,158,0.1)', color: m.from === 'me' ? '#151413' : '#ABD49E', padding: '10px 16px', fontSize: 13, fontFamily: 'CodeSaver, monospace', lineHeight: 1.5 }}>{m.text}</div>
+              <div style={{ color: 'rgba(171,212,158,0.3)', fontSize: 10, fontFamily: 'CodeSaver, monospace', marginTop: 4, textAlign: m.from === 'me' ? 'right' : 'left' }}>{m.time}</div>
+            </div>
+          ))}
+          <div ref={msgEndRef} />
+        </div>
+        <div style={{ padding: '16px 28px', borderTop: '1px solid rgba(171,212,158,0.15)', display: 'flex', gap: 10 }}>
+          <input value={msgInput} onChange={onMsgChange} onKeyDown={e => e.key === 'Enter' && onMsgSend()} placeholder="Type a message..."
+            style={{ flex: 1, backgroundColor: 'rgba(171,212,158,0.06)', border: '1px solid rgba(171,212,158,0.2)', color: '#ABD49E', padding: '12px 16px', fontSize: 13, fontFamily: 'CodeSaver, monospace', outline: 'none' }} />
+          <button onClick={onMsgSend} style={{ backgroundColor: '#ABD49E', border: 'none', color: '#151413', padding: '0 24px', cursor: 'pointer', fontSize: 18, fontWeight: 700 }}>›</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!deskVisible) {
+    // Locked view — desk hidden
+    return (
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 32, padding: 48 }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 56, marginBottom: 16 }}>🔒</div>
+          <div style={{ color: '#ABD49E', fontFamily: 'CodeSaver, monospace', fontSize: 13, letterSpacing: 3, marginBottom: 8 }}>PRIVATE BASE</div>
+          <div style={{ color: 'rgba(171,212,158,0.5)', fontFamily: 'CodeSaver, monospace', fontSize: 12, lineHeight: 1.7, maxWidth: 340 }}>
+            This dreamer keeps their base private. Connect with them to explore their desk.
+          </div>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, width: '100%', maxWidth: 280 }}>
+          <img src={DESK_ASSETS.mailbox} alt="Mailbox" style={{ width: 90, opacity: 0.7 }} />
+          <button onClick={onMailbox} style={btnStyle('#151413', '#ABD49E')}>✉ LEAVE A MAILBOX MESSAGE</button>
+        </div>
+      </div>
+    );
+  }
+
+  // Desk visible — either public stranger or connected user
+  return (
+    <div style={{ flex: 1, position: 'relative', overflowY: 'auto' }}>
+      {/* Desk label */}
+      <div style={{ padding: '24px 40px 12px', borderBottom: '1px solid rgba(171,212,158,0.1)' }}>
+        <div style={{ color: 'rgba(171,212,158,0.5)', fontFamily: 'CodeSaver, monospace', fontSize: 10, letterSpacing: 3 }}>
+          {connectionStatus === 'connected' ? "DREAMER'S DESK" : "PUBLIC VIEW — DREAMER'S DESK"}
+        </div>
+      </div>
+
+      {/* Desk scene */}
+      <div style={{ position: 'relative', padding: '40px', minHeight: 500 }}>
+        {/* Table as base */}
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
+          <img src={DESK_ASSETS.table} alt="" style={{ width: Math.min(560, 560), opacity: 0.9 }} />
+        </div>
+
+        {/* Desk items grid */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 24, maxWidth: 640, margin: '0 auto' }}>
+          {DESK_ITEMS.map(item => (
+            <DeskItemCard key={item.id} item={item} connected={connectionStatus === 'connected'} onClick={() => connectionStatus === 'connected' && onItemClick(item)} />
+          ))}
+        </div>
+
+        {/* Mailbox — visible when not connected (public view) */}
+        {connectionStatus !== 'connected' && (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, marginTop: 32 }}>
+            <img src={DESK_ASSETS.mailbox} alt="Mailbox" style={{ width: 80, cursor: 'pointer' }} onClick={onMailbox} />
+            <div style={{ color: 'rgba(171,212,158,0.5)', fontFamily: 'CodeSaver, monospace', fontSize: 10, letterSpacing: 2 }}>LEAVE A MESSAGE</div>
+          </div>
+        )}
+      </div>
+
+      {/* Desk item detail panel */}
+      {activeItem && (
+        <div style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 400, backgroundColor: '#151413', borderLeft: '1px solid rgba(171,212,158,0.25)', zIndex: 100, display: 'flex', flexDirection: 'column', fontFamily: 'CodeSaver, monospace' }}>
+          <div style={{ backgroundColor: '#ABD49E', height: 52, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 20px', flexShrink: 0 }}>
+            <span style={{ color: '#151413', fontWeight: 700, fontSize: 13, letterSpacing: 1 }}>{activeItem.label}</span>
+            <button onClick={onItemClose} style={{ background: 'none', border: 'none', color: '#151413', fontSize: 20, cursor: 'pointer', fontWeight: 700 }}>×</button>
+          </div>
+          <div style={{ flex: 1, padding: 24, display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto' }}>
+            <img src={activeItem.asset} alt={activeItem.label} style={{ maxWidth: 200, margin: '0 auto', display: 'block', opacity: 0.9 }} />
+            <div style={{ color: 'rgba(171,212,158,0.65)', fontSize: 12, lineHeight: 1.8 }}>{activeItem.desc}</div>
+            <div style={{ color: 'rgba(171,212,158,0.3)', fontSize: 11, letterSpacing: 1, padding: '16px 0', borderTop: '1px solid rgba(171,212,158,0.1)', textAlign: 'center' }}>
+              CONTENT COMING SOON
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DESKTOP EVENTS VIEW
+// ─────────────────────────────────────────────────────────────────────────────
+function EventsView({ events }) {
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', padding: '32px 40px' }}>
+      <div style={{ color: 'rgba(171,212,158,0.5)', fontFamily: 'CodeSaver, monospace', fontSize: 10, letterSpacing: 3, marginBottom: 24 }}>EVENTS</div>
+      {events.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '60px 0' }}>
+          <div style={{ fontSize: 40, marginBottom: 16 }}>◈</div>
+          <div style={{ color: 'rgba(171,212,158,0.35)', fontFamily: 'CodeSaver, monospace', fontSize: 11, letterSpacing: 2 }}>NO EVENTS TO SHOW</div>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 16 }}>
+          {events.map(ev => (
+            <div key={ev.id} style={{ border: '1px solid rgba(171,212,158,0.2)', padding: 16, fontFamily: 'CodeSaver, monospace' }}>
+              <div style={{ color: '#ABD49E', fontWeight: 700, fontSize: 13 }}>{ev.title}</div>
+              <div style={{ color: 'rgba(171,212,158,0.5)', fontSize: 11, marginTop: 8 }}>{ev.date}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DESKTOP STORE VIEW
+// ─────────────────────────────────────────────────────────────────────────────
+function StoreView({ items }) {
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', padding: '32px 40px' }}>
+      <div style={{ color: 'rgba(171,212,158,0.5)', fontFamily: 'CodeSaver, monospace', fontSize: 10, letterSpacing: 3, marginBottom: 24 }}>STORE</div>
+      {items.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '60px 0' }}>
+          <div style={{ fontSize: 40, marginBottom: 16 }}>◻</div>
+          <div style={{ color: 'rgba(171,212,158,0.35)', fontFamily: 'CodeSaver, monospace', fontSize: 11, letterSpacing: 2 }}>NO ITEMS IN STORE</div>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 16 }}>
+          {items.map(item => (
+            <div key={item.id} style={{ border: '1px solid rgba(171,212,158,0.2)', fontFamily: 'CodeSaver, monospace' }}>
+              <div style={{ aspectRatio: '1', backgroundColor: 'rgba(171,212,158,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {item.image ? <img src={item.image} alt={item.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ color: 'rgba(171,212,158,0.2)', fontSize: 32 }}>◻</span>}
+              </div>
+              <div style={{ padding: '12px 14px' }}>
+                <div style={{ color: '#ABD49E', fontSize: 12, fontWeight: 700 }}>{item.name}</div>
+                <div style={{ color: 'rgba(171,212,158,0.6)', fontSize: 11, marginTop: 4 }}>{item.price}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DESK ITEM CARD (desktop grid)
+// ─────────────────────────────────────────────────────────────────────────────
+function DeskItemCard({ item, connected, onClick }) {
+  return (
+    <div onClick={onClick} style={{
+      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, padding: '20px 16px',
+      border: `1px solid ${connected ? 'rgba(171,212,158,0.2)' : 'rgba(171,212,158,0.08)'}`,
+      cursor: connected ? 'pointer' : 'default',
+      transition: 'border-color 0.2s, background 0.2s',
+      backgroundColor: 'rgba(171,212,158,0.03)',
+    }}
+      onMouseEnter={e => connected && (e.currentTarget.style.borderColor = 'rgba(171,212,158,0.5)')}
+      onMouseLeave={e => connected && (e.currentTarget.style.borderColor = 'rgba(171,212,158,0.2)')}
+    >
+      <img src={item.asset} alt={item.label}
+        style={{ width: item.size.w, height: item.size.h, objectFit: 'contain', opacity: connected ? 0.9 : 0.4, filter: connected ? 'none' : 'grayscale(1)' }} />
+      <div style={{ color: connected ? '#ABD49E' : 'rgba(171,212,158,0.3)', fontFamily: 'CodeSaver, monospace', fontSize: 9, letterSpacing: 2, textAlign: 'center' }}>{item.label}</div>
+      {connected && <div style={{ color: 'rgba(171,212,158,0.4)', fontSize: 9, fontFamily: 'CodeSaver, monospace', letterSpacing: 1, textAlign: 'center', lineHeight: 1.5 }}>{item.desc}</div>}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DESK ITEM MODAL (mobile)
+// ─────────────────────────────────────────────────────────────────────────────
+function DeskItemModal({ item, onClose, ownerName }) {
+  return (
+    <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.8)', zIndex: 200, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={onClose}>
+      <div style={{ backgroundColor: '#151413', border: '1px solid rgba(171,212,158,0.3)', width: '100%', maxHeight: '70dvh', display: 'flex', flexDirection: 'column', fontFamily: 'CodeSaver, monospace' }} onClick={e => e.stopPropagation()}>
+        <div style={{ backgroundColor: '#ABD49E', color: '#151413', height: 48, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px', flexShrink: 0 }}>
+          <span style={{ fontWeight: 700, fontSize: 12, letterSpacing: 1 }}>{item.label}</span>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#151413', fontSize: 20, cursor: 'pointer', fontWeight: 700 }}>×</button>
+        </div>
+        <div style={{ overflowY: 'auto', padding: 20, display: 'flex', flexDirection: 'column', gap: 14, alignItems: 'center' }}>
+          <img src={item.asset} alt={item.label} style={{ maxWidth: 160, opacity: 0.9 }} />
+          <div style={{ color: 'rgba(171,212,158,0.65)', fontSize: 12, lineHeight: 1.8, textAlign: 'center' }}>{item.desc}</div>
+          <div style={{ color: 'rgba(171,212,158,0.3)', fontSize: 11, letterSpacing: 1 }}>CONTENT COMING SOON</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FULLSCREEN CHAT (mobile)
+// ─────────────────────────────────────────────────────────────────────────────
+function FullscreenChat({ messages, msgInput, onChange, onSend, onClose, msgEndRef, profileData }) {
+  return (
+    <div style={{ position: 'fixed', inset: 0, backgroundColor: '#151413', zIndex: 300, display: 'flex', flexDirection: 'column', fontFamily: 'CodeSaver, monospace' }}>
+      <div style={{ backgroundColor: '#ABD49E', height: 52, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px', flexShrink: 0 }}>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#151413', cursor: 'pointer', fontSize: 11, letterSpacing: 1, fontFamily: 'CodeSaver, monospace' }}>← BACK</button>
+        <span style={{ color: '#151413', fontWeight: 700, fontSize: 12, letterSpacing: 2 }}>{profileData?.displayName?.toUpperCase()}</span>
+        <div style={{ width: 60 }} />
+      </div>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {messages.length === 0 && (
+          <div style={{ color: 'rgba(171,212,158,0.3)', fontSize: 11, textAlign: 'center', marginTop: 40, letterSpacing: 2 }}>NO MESSAGES YET</div>
+        )}
+        {messages.map(m => (
+          <div key={m.id} style={{ alignSelf: m.from === 'me' ? 'flex-end' : 'flex-start', maxWidth: '80%' }}>
+            <div style={{ backgroundColor: m.from === 'me' ? '#ABD49E' : 'rgba(171,212,158,0.1)', color: m.from === 'me' ? '#151413' : '#ABD49E', padding: '10px 14px', fontSize: 13, lineHeight: 1.5 }}>{m.text}</div>
+            <div style={{ color: 'rgba(171,212,158,0.3)', fontSize: 9, marginTop: 3, textAlign: m.from === 'me' ? 'right' : 'left' }}>{m.time}</div>
+          </div>
+        ))}
+        <div ref={msgEndRef} />
+      </div>
+      <div style={{ padding: '12px 16px', borderTop: '1px solid rgba(171,212,158,0.15)', display: 'flex', gap: 8, flexShrink: 0 }}>
+        <input value={msgInput} onChange={onChange} onKeyDown={e => e.key === 'Enter' && onSend()} placeholder="Type a message..."
+          style={{ flex: 1, backgroundColor: 'rgba(171,212,158,0.08)', border: '1px solid rgba(171,212,158,0.2)', color: '#ABD49E', padding: '12px 14px', fontSize: 13, outline: 'none', fontFamily: 'CodeSaver, monospace' }} />
+        <button onClick={onSend} style={{ backgroundColor: '#ABD49E', border: 'none', color: '#151413', width: 48, cursor: 'pointer', fontSize: 18, fontWeight: 700 }}>›</button>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MAILBOX MODAL
+// ─────────────────────────────────────────────────────────────────────────────
+function MailboxModal({ onClose, value, onChange, onSend, displayName }) {
+  return (
+    <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.75)', zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, fontFamily: 'CodeSaver, monospace' }} onClick={onClose}>
+      <div style={{ backgroundColor: '#151413', border: '1px solid #ABD49E', width: '100%', maxWidth: 360 }} onClick={e => e.stopPropagation()}>
+        <div style={{ backgroundColor: '#ABD49E', color: '#151413', height: 48, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px' }}>
+          <span style={{ fontWeight: 700, fontSize: 13, letterSpacing: 1 }}>✉ MAILBOX — {displayName?.toUpperCase()}</span>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#151413', fontSize: 20, cursor: 'pointer', fontWeight: 700 }}>×</button>
+        </div>
+        <div style={{ padding: 20 }}>
+          <div style={{ color: 'rgba(171,212,158,0.5)', fontSize: 11, letterSpacing: 1, marginBottom: 12 }}>
+            YOUR MESSAGE (ANONYMOUS IF NOT CONNECTED)
+          </div>
+          <textarea value={value} onChange={onChange} rows={4} placeholder="Leave a message in their mailbox..."
+            style={{ width: '100%', backgroundColor: 'rgba(171,212,158,0.06)', border: '1px solid rgba(171,212,158,0.25)', color: '#ABD49E', padding: '10px 12px', fontSize: 12, fontFamily: 'CodeSaver, monospace', resize: 'vertical', outline: 'none', boxSizing: 'border-box' }} />
+          <button onClick={onSend} style={{ ...btnStyle('#ABD49E', '#151413'), marginTop: 12 }}>SEND TO MAILBOX</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SHARED STYLE HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
+function btnStyle(bg, color) {
+  return {
+    width: '100%', height: 44, backgroundColor: bg,
+    border: `1px solid ${color === '#151413' ? '#ABD49E' : color}`,
+    color, cursor: 'pointer', fontSize: 11, letterSpacing: 2,
+    fontFamily: 'CodeSaver, monospace', fontWeight: 700,
+    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+  };
+}
+
+const pillStyle = {
+  display: 'inline-flex', alignItems: 'center', padding: '8px 14px',
+  border: '1px solid rgba(171,212,158,0.3)', color: 'rgba(171,212,158,0.6)',
+  fontSize: 10, fontFamily: 'CodeSaver, monospace', letterSpacing: 2,
+};
