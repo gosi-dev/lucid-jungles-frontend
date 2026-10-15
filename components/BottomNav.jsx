@@ -4,10 +4,16 @@ import { useRouter } from "next/router";
 import { useLayout } from "../context/LayoutContext";
 import { useEffect } from "react";
 import { Map, Sparkles, Dumbbell, Store, User } from "lucide-react";
+import { useIsDesktop } from "../hooks/useIsDesktop";
 
 // Five destinations, ported from CONSOLIDATED/client/components/BottomNav.jsx.
 // Mounted once in pages/_app.js so the bar exists on every route; routes that need
 // the full viewport opt out with useHideBottomNav(true).
+//
+// It is a phone tab bar: a fixed 75px strip of five equal tabs. Stretched across a desktop
+// window that is five 288px targets, which is not a desktop layout, so from 1024px up the
+// bar is not rendered at all — the same breakpoint every other desktop branch uses. Pages
+// that still want it at any width drive it with useHideBottomNav.
 const NAV_ITEMS = [
   { name: "WAKING", icon: Map, href: "/" },
   { name: "DREAMING", icon: Sparkles, href: "/profile" },
@@ -31,6 +37,7 @@ const ACTIVE_BY_PREFIX = [
 export default function BottomNav() {
   const router = useRouter();
   const { showBottomNav, activeNav, setActiveNav } = useLayout();
+  const isDesktop = useIsDesktop();
 
   useEffect(() => {
     const path = router.pathname;
@@ -47,7 +54,7 @@ export default function BottomNav() {
     if (hit) setActiveNav(hit[1]);
   }, [router.pathname, setActiveNav]);
 
-  if (!showBottomNav) return null;
+  if (!showBottomNav || isDesktop) return null;
 
   return (
     <nav

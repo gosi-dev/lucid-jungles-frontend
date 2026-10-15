@@ -8,6 +8,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/router';
 import { useSignedIn } from '../hooks/useSignedIn';
 import MvpShell, { mvpCard, mvpInput, mvpButton } from '../components/MvpShell';
+import { useIsDesktop } from '../hooks/useIsDesktop';
 
 // Deterministic and order-independent, so both sides land in the same thread.
 export const threadIdFor = (a, b) => [String(a), String(b)].sort().join('__');
@@ -109,6 +110,14 @@ export default function ChatPage() {
     setThreadInput('');
   }
 
+  const isDesktop = useIsDesktop();
+
+  // The conversation fills what the window has left after the shell header and padding.
+  // Browsing (`/chat` with no ?to=) also carries the open-by-id card, so the panes give
+  // that back rather than pushing the composer off the bottom.
+  const paneHeight = isDesktop ? (toUserId ? 'calc(100vh - 140px)' : 'calc(100vh - 320px)') : 'auto';
+  const paneFloor = isDesktop ? 320 : undefined;
+
   return (
     <MvpShell
       title="CHAT"
@@ -133,60 +142,95 @@ export default function ChatPage() {
       </div>
       )}
 
-      {loading ? (
-        <div style={{ opacity: 0.5, padding: 40, textAlign: 'center' }}>Loading threads...</div>
-      ) : threads.length === 0 ? (
-        <div style={{ opacity: 0.6, padding: 24, textAlign: 'center' }}>No conversations yet.</div>
-      ) : (
-        threads.map((t) => (
-          <button
-            key={t._id}
-            type="button"
-            onClick={() => openThread(t._id)}
+      {/* One pane on a phone, two on a desktop: the conversations on the left, the open
+          conversation on the right. */}
+      <div style={{ display: isDesktop ? 'flex' : 'block', gap: 16, alignItems: 'stretch' }}>
+        <div
+          style={{
+            width: isDesktop ? 320 : '100%',
+            flexShrink: 0,
+            maxHeight: paneHeight,
+            minHeight: paneFloor,
+            overflowY: isDesktop ? 'auto' : 'visible',
+          }}
+        >
+          {loading ? (
+            <div style={{ opacity: 0.5, padding: 40, textAlign: 'center' }}>Loading threads...</div>
+          ) : threads.length === 0 ? (
+            <div style={{ opacity: 0.6, padding: 24, textAlign: 'center' }}>No conversations yet.</div>
+          ) : (
+            threads.map((t) => (
+              <button
+                key={t._id}
+                type="button"
+                onClick={() => openThread(t._id)}
+                style={{
+                  ...mvpCard,
+                  width: '100%',
+                  textAlign: 'left',
+                  background: activeThread === t._id ? 'rgba(171,212,158,0.12)' : 'transparent',
+                  color: '#ABD49E',
+                  cursor: 'pointer',
+                }}
+              >
+                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>{t._id}</div>
+                <div style={{ fontSize: 11, opacity: 0.6 }}>{t.lastMessage}</div>
+              </button>
+            ))
+          )}
+        </div>
+
+        {activeThread || isDesktop ? (
+          <div
             style={{
               ...mvpCard,
-              width: '100%',
-              textAlign: 'left',
-              background: activeThread === t._id ? 'rgba(171,212,158,0.12)' : 'transparent',
-              color: '#ABD49E',
-              cursor: 'pointer',
+              marginTop: isDesktop ? 0 : 16,
+              flex: 1,
+              minWidth: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              height: isDesktop ? paneHeight : undefined,
+              minHeight: paneFloor,
             }}
           >
-            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>{t._id}</div>
-            <div style={{ fontSize: 11, opacity: 0.6 }}>{t.lastMessage}</div>
-          </button>
-        ))
-      )}
-
-      {activeThread ? (
-        <div style={{ ...mvpCard, marginTop: 16 }}>
-          <div style={{ fontSize: 11, opacity: 0.6, letterSpacing: 1, marginBottom: 10 }}>
-            THREAD: {activeThread}
-          </div>
-          <div style={{ maxHeight: 320, overflow: 'auto', marginBottom: 12 }}>
-            {messages.length === 0 ? (
-              <div style={{ fontSize: 12, opacity: 0.6 }}>No messages yet.</div>
-            ) : (
-              messages.map((m) => (
-                <div key={m._id} style={{ fontSize: 12, marginBottom: 8 }}>
-                  <span style={{ fontWeight: 700 }}>@{m.senderId?.username || 'you'}: </span>
-                  {m.content}
+            <div style={{ fontSize: 11, opacity: 0.6, letterSpacing: 1, marginBottom: 10 }}>
+              {activeThread ? `THREAD: ${activeThread}` : 'NO CONVERSATION OPEN'}
+            </div>
+            <div style={{ flex: 1, maxHeight: isDesktop ? undefined : 320, overflow: 'auto', marginBottom: 12 }}>
+              {messages.length === 0 ? (
+                <div style={{ fontSize: 12, opacity: 0.6 }}>
+                  {activeThread ? 'No messages yet.' : 'Open a conversation on the left, or start one by id.'}
                 </div>
-              ))
-            )}
+              ) : (
+                messages.map((m) => (
+                  <div key={m._id} style={{ fontSize: 12, marginBottom: 8 }}>
+                    <span style={{ fontWeight: 700 }}>@{m.senderId?.username || 'you'}: </span>
+                    {m.content}
+                  </div>
+                ))
+              )}
+            </div>
+            {/* Stacked on a phone, one row on a desktop where the width is there for it. */}
+            <div style={{ display: isDesktop ? 'flex' : 'block', gap: 10, alignItems: 'center' }}>
+              <input
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => (e.key === 'Enter' ? send() : null)}
+                placeholder="Type a message"
+                style={{ ...mvpInput, ...(isDesktop ? { flex: 1, marginBottom: 0 } : null) }}
+              />
+              <button
+                type="button"
+                onClick={send}
+                disabled={!draft.trim()}
+                style={{ ...mvpButton(!draft.trim()), ...(isDesktop ? { width: 96 } : null) }}
+              >
+                SEND
+              </button>
+            </div>
           </div>
-          <input
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => (e.key === 'Enter' ? send() : null)}
-            placeholder="Type a message"
-            style={mvpInput}
-          />
-          <button type="button" onClick={send} disabled={!draft.trim()} style={mvpButton(!draft.trim())}>
-            SEND
-          </button>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
     </MvpShell>
   );
 }

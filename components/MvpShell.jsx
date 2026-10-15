@@ -3,12 +3,17 @@
 // Quests / commerce). Matches the app's emerald-on-charcoal theme.
 import Head from 'next/head';
 import { useRouter } from 'next/router';
+import { useIsDesktop } from '../hooks/useIsDesktop';
 
 const GREEN = '#ABD49E';
 const LINE = 'rgba(171,212,158,0.15)';
+// The same content width the event and entity pages use, so every desktop surface in the
+// app lines up on one grid instead of each page picking its own.
+export const CONTENT_MAX = 1180;
 
 export default function MvpShell({ title, subtitle, children, showBack = true, actions = null }) {
   const router = useRouter();
+  const isDesktop = useIsDesktop();
 
   return (
     <>
@@ -20,48 +25,65 @@ export default function MvpShell({ title, subtitle, children, showBack = true, a
           minHeight: '100vh',
           backgroundColor: '#151413',
           color: GREEN,
-          paddingBottom: 100,
+          // The phone tab bar is gone from 1024px up (see BottomNav), so the space it
+          // reserved is gone with it.
+          paddingBottom: isDesktop ? 48 : 100,
           fontFamily: 'CodeSaver, monospace',
         }}
       >
         <div
           style={{
-            height: 54,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
             position: 'sticky',
             top: 0,
             backgroundColor: '#151413',
             borderBottom: `1px solid ${LINE}`,
-            padding: '0 16px',
             zIndex: 10,
           }}
         >
-          <button
-            type="button"
-            onClick={() => (showBack ? router.back() : null)}
+          <div
             style={{
-              background: 'transparent',
-              border: 'none',
-              color: GREEN,
-              cursor: 'pointer',
-              fontSize: 18,
-              visibility: showBack ? 'visible' : 'hidden',
+              height: 54,
+              maxWidth: isDesktop ? CONTENT_MAX : undefined,
+              margin: '0 auto',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: isDesktop ? '0 32px' : '0 16px',
             }}
-            aria-label="Back"
           >
-            ←
-          </button>
-          <div style={{ textAlign: 'center', lineHeight: 1.2 }}>
-            <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: 2 }}>{title}</div>
-            {subtitle ? (
-              <div style={{ fontSize: 10, opacity: 0.6, letterSpacing: 1 }}>{subtitle}</div>
-            ) : null}
+            <button
+              type="button"
+              onClick={() => (showBack ? router.back() : null)}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: GREEN,
+                cursor: 'pointer',
+                fontSize: 18,
+                visibility: showBack ? 'visible' : 'hidden',
+              }}
+              aria-label="Back"
+            >
+              ←
+            </button>
+            <div style={{ textAlign: 'center', lineHeight: 1.2 }}>
+              <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: 2 }}>{title}</div>
+              {subtitle ? (
+                <div style={{ fontSize: 10, opacity: 0.6, letterSpacing: 1 }}>{subtitle}</div>
+              ) : null}
+            </div>
+            <div style={{ minWidth: 18, textAlign: 'right' }}>{actions}</div>
           </div>
-          <div style={{ minWidth: 18, textAlign: 'right' }}>{actions}</div>
         </div>
-        <div style={{ padding: 16 }}>{children}</div>
+        <div
+          style={{
+            maxWidth: isDesktop ? CONTENT_MAX : undefined,
+            margin: '0 auto',
+            padding: isDesktop ? '28px 32px 0' : 16,
+          }}
+        >
+          {children}
+        </div>
       </div>
     </>
   );
