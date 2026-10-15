@@ -8,6 +8,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/router';
 import { useSignedIn } from '../hooks/useSignedIn';
 import MvpShell, { mvpCard, mvpInput, mvpButton } from '../components/MvpShell';
+import { DESKTOP_NAV_H } from '../components/DesktopNavRow';
 import { useIsDesktop } from '../hooks/useIsDesktop';
 
 // Deterministic and order-independent, so both sides land in the same thread.
@@ -112,10 +113,13 @@ export default function ChatPage() {
 
   const isDesktop = useIsDesktop();
 
-  // The conversation fills what the window has left after the shell header and padding.
+  // The conversation fills what the window has left after the shell header and padding. On a
+  // desktop the header also carries DesktopNavRow, so its height is in the subtraction too —
+  // otherwise the composer is pushed 46px past the bottom of the screen.
   // Browsing (`/chat` with no ?to=) also carries the open-by-id card, so the panes give
   // that back rather than pushing the composer off the bottom.
-  const paneHeight = isDesktop ? (toUserId ? 'calc(100vh - 140px)' : 'calc(100vh - 320px)') : 'auto';
+  const chrome = 140 + (isDesktop ? DESKTOP_NAV_H : 0);
+  const paneHeight = isDesktop ? `calc(100vh - ${toUserId ? chrome : chrome + 180}px)` : 'auto';
   const paneFloor = isDesktop ? 320 : undefined;
 
   return (

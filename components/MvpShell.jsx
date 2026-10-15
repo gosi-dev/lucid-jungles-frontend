@@ -4,6 +4,7 @@
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { useIsDesktop } from '../hooks/useIsDesktop';
+import DesktopNavRow, { NAV_GAP } from './DesktopNavRow';
 
 const GREEN = '#ABD49E';
 const LINE = 'rgba(171,212,158,0.15)';
@@ -74,6 +75,13 @@ export default function MvpShell({ title, subtitle, children, showBack = true, a
             </div>
             <div style={{ minWidth: 18, textAlign: 'right' }}>{actions}</div>
           </div>
+          {/* From 1024px up the phone tab bar is not rendered (see BottomNav), and these
+              routes have no MENU of their own, so the same five destinations live here. */}
+          {isDesktop ? (
+            <div style={{ maxWidth: CONTENT_MAX, margin: '0 auto', padding: `0 32px ${NAV_GAP}px` }}>
+              <DesktopNavRow />
+            </div>
+          ) : null}
         </div>
         <div
           style={{

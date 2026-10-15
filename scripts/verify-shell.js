@@ -48,7 +48,13 @@ const MEASURE = `(() => {
   const scrollers = [...document.querySelectorAll('#__next div')].filter(d => getComputedStyle(d).overflowY === 'auto');
   const composer = document.querySelector('input[placeholder="Type a message"]');
   const widest = cards.length ? Math.max(...cards) : 0;
+  // The phone tab bar is the fixed-bottom nav; the desktop nav row is a nav that is not.
+  // Counting every visible nav would let the desktop row satisfy "the tab bar is gone".
   const navs = [...document.querySelectorAll('nav')].filter(n => n.getBoundingClientRect().height > 0);
+  const isBar = (n) => { const s = getComputedStyle(n); return s.position === 'fixed' && parseFloat(s.bottom) === 0; };
+  const row = document.querySelector('nav[aria-label="Sections"]');
+  const rowItems = row ? [...row.querySelectorAll('a')] : [];
+  const bar = navs.find(isBar);
   return {
     vw: window.innerWidth,
     cards,
@@ -58,7 +64,11 @@ const MEASURE = `(() => {
     composer: box(composer),
     // The pane the composer lives in: its height is what actually uses the window.
     composerPane: box(composer ? composer.closest('div[style*="flex-direction"]') : null),
-    bottomNav: navs.length,
+    bottomNav: navs.filter(isBar).length,
+    barTabs: bar ? [...bar.querySelectorAll('a')].map(a => a.textContent.trim()) : [],
+    navRow: box(row),
+    navRowItems: rowItems.map(a => a.textContent.trim()),
+    navRowActive: rowItems.filter(a => a.getAttribute('aria-current') === 'page').map(a => a.textContent.trim()),
     docHeight: document.documentElement.scrollHeight,
     text: document.body.innerText.replace(/\\n+/g, ' | ').slice(0, 240),
   };
@@ -124,7 +134,13 @@ async function waitFor(c, expr, timeoutMs = 12000, stepMs = 300) {
   const d = await c.eval(MEASURE);
   console.log('   desktop measure :', JSON.stringify(d));
   ok('shell desktop: content sits in the 1180 grid, not the window', d.widest <= 1180 && d.widest > 700, `widest card ${d.widest}px of ${d.vw}px`);
-  ok('shell desktop: the phone tab bar is gone', d.bottomNav === 0, `${d.bottomNav} visible nav element(s)`);
+  ok('shell desktop: the phone tab bar is gone', d.bottomNav === 0, `${d.bottomNav} fixed-bottom nav element(s)`);
+  // The bar was the only navigation these routes had, so the row is what replaces it: the
+  // same five destinations, starting on the content grid, exactly one of them lit.
+  ok('shell desktop: the header carries the five destinations instead', !!d.navRow && d.navRowItems.length === 5, d.navRow ? `${d.navRowItems.join(' ')} — ${d.navRow.w}x${d.navRow.h}` : 'no desktop nav row');
+  ok('shell desktop: the nav row starts on the content grid (x=162)', !!d.navRow && d.navRow.x === 162, d.navRow ? `x=${d.navRow.x}` : 'no nav row');
+  ok('shell desktop: exactly one destination is lit', d.navRowActive.length === 1, d.navRowActive.join(',') || 'nothing lit');
+  ok('chat desktop: the header the row added still leaves the page inside the window', d.docHeight <= 902, `docHeight ${d.docHeight} of 900`);
   ok('chat desktop: conversations and conversation are side by side', !!d.composer && d.composer.x > 300, d.composer ? `composer at x=${d.composer.x}` : 'no composer');
   ok('chat desktop: the conversation uses the window height', !!d.composerPane && d.composerPane.h > 400, d.composerPane ? `pane ${d.composerPane.w}x${d.composerPane.h}` : 'no pane');
   ok('chat desktop: composer is a readable width', !!d.composer && d.composer.w > 300 && d.composer.w < 1000, d.composer ? `${d.composer.w}px` : 'no composer');
@@ -147,6 +163,19 @@ async function waitFor(c, expr, timeoutMs = 12000, stepMs = 300) {
   await sleep(900);
   const w = await c.eval(MEASURE);
   console.log('   /world measure  :', JSON.stringify(w));
+  ok('shell desktop: /world carries the same row', !!w.navRow && w.navRowItems.length === 5, w.navRow ? `x=${w.navRow.x}, lit ${w.navRowActive.join(',')}` : 'no nav row');
+  // The row has to navigate, not just draw. DOJO is unambiguous: a map or the store could
+  // land somewhere that also renders, so the destination is checked by pathname.
+  const rowClick = await c.eval(`(() => {
+    const a = [...document.querySelectorAll('nav[aria-label="Sections"] a')].find(x => x.textContent.trim() === 'DOJO');
+    if (!a) return { clicked: false };
+    a.click();
+    return { clicked: true, href: a.getAttribute('href') };
+  })()`);
+  for (let i = 0; i < 20 && (await c.eval('location.pathname')) !== '/dojo'; i++) await sleep(300);
+  const afterRow = await c.eval('location.pathname');
+  ok('shell desktop: a destination in the row navigates', rowClick.clicked === true && afterRow === '/dojo', `DOJO (href=${rowClick.href}) landed on ${afterRow}`);
+  await c.goto(`${BASE}/world`, 2500);
   await shot(c, '/tmp/shot_world_desktop.png');
 
   // ---------------------------------------------------------------- /chat on a phone
@@ -157,7 +186,9 @@ async function waitFor(c, expr, timeoutMs = 12000, stepMs = 300) {
   console.log('   mobile measure  :', JSON.stringify(m));
   ok('chat mobile: phone layout still fills the width', m.widest > m.vw - 60, `widest ${m.widest}px of ${m.vw}px`);
   ok('chat mobile: still one column (composer under the thread)', !!m.composer && m.composer.x < 40, m.composer ? `composer at x=${m.composer.x}` : 'no composer');
-  ok('chat mobile: the phone tab bar is there', m.bottomNav > 0, `${m.bottomNav} visible nav element(s)`);
+  ok('chat mobile: the phone tab bar is there', m.bottomNav > 0, `${m.bottomNav} fixed-bottom nav element(s)`);
+  ok('chat mobile: the desktop nav row is not in the phone layout', !m.navRow, m.navRow ? `row at x=${m.navRow.x}` : 'absent');
+  ok('chat mobile: the bar still carries all five destinations', m.barTabs.length === 5, m.barTabs.join(' ') || 'no bar');
   await shot(c, '/tmp/shot_chat_mobile.png');
 
   // ------------------------- the other routes that share the shell, at both widths
@@ -166,24 +197,57 @@ async function waitFor(c, expr, timeoutMs = 12000, stepMs = 300) {
   // catches the "renders but throws" case a width measurement alone would miss.
   const HOSTS = ['/home', '/feed', '/quests', '/store', '/cart', '/orders', '/settings', '/world'];
   const SHELL_WIDTH = `(() => {
+    const menu = [...document.querySelectorAll('button,[role="button"]')].some(b => (b.textContent || '').trim() === 'MENU');
+    const row = document.querySelector('nav[aria-label="Sections"]');
+    const bar = [...document.querySelectorAll('nav')].filter(n => { const s = getComputedStyle(n); return s.position === 'fixed' && parseFloat(s.bottom) === 0 && n.getBoundingClientRect().height > 0; }).length;
     const cards = [...document.querySelectorAll('#__next div')].filter(el => {
       const s = getComputedStyle(el);
       return s.borderTopStyle === 'solid' && s.borderTopColor === 'rgba(171, 212, 158, 0.15)' && parseFloat(s.borderTopWidth) === 1;
     }).map(el => Math.round(el.getBoundingClientRect().width));
-    return { widest: cards.length ? Math.max(...cards) : 0, text: document.body.innerText.replace(/\\n+/g, ' | ').slice(0, 80) };
+    return { widest: cards.length ? Math.max(...cards) : 0, text: document.body.innerText.replace(/\\n+/g, ' | ').slice(0, 80), menu, row: !!row, bar, path: location.pathname };
   })()`;
 
-  for (const width of [1440, 390]) {
+  // 1024 is in the loop because that is exactly where navigation changes hands from the
+  // phone bar to the desktop row — the boundary is the thing worth testing, not just the
+  // two ends of it.
+  for (const width of [1440, 1024, 390]) {
+    const desktop = width >= 1024;
     await setViewport(c, width, width < 600 ? 844 : 900);
     for (const host of HOSTS) {
       c.freshErrors();
       await c.goto(BASE + host, 2200);
       const errs = c.freshErrors();
       const v = await c.eval(SHELL_WIDTH);
-      const fits = width >= 1024 ? v.widest <= 1180 : v.widest === 0 || v.widest > width - 60;
+      const fits = desktop ? v.widest <= 1180 : v.widest === 0 || v.widest > width - 60;
       ok(`shell ${width}px: ${host} renders clean and sized`, errs.length === 0 && fits, errs.length ? String(errs[0]).slice(0, 120) : `${v.widest}px — ${v.text}`);
+      // /store is the one host in this list that does not mount MvpShell (it has NavBar's
+      // MENU), so the claim is "navigation is reachable", not "the row is present".
+      const navOk = desktop ? (v.row || v.menu) : (v.bar > 0 && !v.row);
+      ok(`shell ${width}px: ${host} keeps navigation reachable`, navOk, desktop ? `row=${v.row} menu=${v.menu}` : `bar=${v.bar} row=${v.row}`);
     }
   }
+
+  // ------------- the two pages that ask for the bar themselves (useHideBottomNav(false))
+  // The width decides the default, but an explicit request must beat it. /you and /tkxts call
+  // useHideBottomNav(false) and have no other navigation, so letting the breakpoint overrule
+  // them left both routes with no way out at 1024px and up. Checked at both ends of the
+  // boundary, in both directions: nothing asked → the default; asked → the bar.
+  for (const width of [1440, 390]) {
+    await setViewport(c, width, width < 600 ? 844 : 900);
+    for (const host of ['/you', '/tkxts']) {
+      c.freshErrors();
+      await c.goto(BASE + host, 3200);
+      const errs = c.freshErrors();
+      const v = await c.eval(SHELL_WIDTH);
+      ok(`nav opt-in ${width}px: ${host} keeps the bar it asked for`, errs.length === 0 && v.bar > 0, errs.length ? String(errs[0]).slice(0, 120) : `bar=${v.bar} row=${v.row} path=${v.path}`);
+      const tabs = await c.eval(`document.querySelectorAll('nav a[href]').length`);
+      ok(`nav opt-in ${width}px: ${host} bar still carries its destinations there`, tabs >= 5, `${tabs} links`);
+    }
+    await c.goto(BASE + '/home', 2500);
+    const bare = await c.eval(SHELL_WIDTH);
+    ok(`nav opt-in ${width}px: /home (nothing asked) still follows the width`, width >= 1024 ? (bare.bar === 0 && bare.row) : (bare.bar > 0 && !bare.row), `bar=${bare.bar} row=${bare.row}`);
+  }
+
 
   // ------------------------------------------- the persisted store carries no password
   // Written as a legacy device would have it, then read back after the app has loaded,

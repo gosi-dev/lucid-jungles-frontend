@@ -38,10 +38,26 @@ VIEW PORTFOLIO / VIEW PROFILE / MESSAGE lead. Also that `?tab=` is honoured, tha
 desktop layout does not overflow, and that the phone layout keeps its scroller.
 
 `verify-shell.js` — the routes that share `components/MvpShell.jsx`: content stays inside
-the 1180px desktop grid, the phone tab bar is gone above 1024px and back below it, `/chat`
-lays out as two panes and a sent message really renders, every shell route renders without
-throwing, and the persisted redux slice carries no plaintext password — including a legacy
-blob written the way the old slice would have written it.
+the 1180px desktop grid, the phone tab bar is gone above 1024px and replaced by the desktop
+nav row in the header (the same five destinations, starting on the content grid at x=162,
+exactly one lit, and one of them clicked through to its route), the bar takes over again
+below the breakpoint at 1024/390, `/chat` lays out as two panes with the composer still
+inside the window now that the header is taller, every shell route renders without throwing,
+and the persisted redux slice carries no plaintext password — including a legacy blob written
+the way the old slice would have written it.
+
+Two things this suite learned the hard way, worth keeping: the "tab bar is gone" check counts
+only *fixed-bottom* navs (the desktop row is also a `<nav>`, so counting every nav would let
+the row satisfy the claim), and a shell-header height change belongs in `pages/chat.js`'s
+subtraction (`DESKTOP_NAV_H` from `components/DesktopNavRow.jsx`) or the composer ends up
+below the fold — the check that catches it is `docHeight <= 902` at 1440x900.
+
+The breakpoint is pinned in both directions. The width sets the *default* (from 1024px up the
+bar is not rendered), but a page that asked for the bar with `useHideBottomNav(false)` keeps
+it at any width: `/you` and `/tkxts` ask, and they have no other navigation, so letting the
+breakpoint overrule the request left both routes with no way out. Those two are checked at
+1440 and 390 with `/home` next to them — nothing asked, so the default must still apply — so
+the exception cannot quietly turn into the rule.
 
 `verify-profile.js` — the page the entity dialog's other action opens
 (`pages/profile/[username].js`): the 1180px grid and the two-column split on a desktop, the
