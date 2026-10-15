@@ -5,6 +5,7 @@
 
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/router';
+import { useSelector } from 'react-redux';
 import Head from 'next/head';
 import { useHideBottomNav } from '../hooks/useHideBottomNav';
 // Kept from rebuilt's previous /[username].js (commit da91698): the dynamic
@@ -15,6 +16,15 @@ import { useUsernameLookup, USER_LOOKUP } from '../hooks/useUsernameLookup';
 import { useBaseLookup, BASE_LOOKUP } from '../hooks/useBaseLookup';
 import MockAvatar from '../components/MockAvatar';
 import VitalBars, { deriveVitals } from '../components/VitalBars';
+// The base as a plan view: tiers, rooms and the rules that make placing furniture
+// feel like a home. One engine, four scales — the desk below is still the same desk.
+import PlanRoom from '../components/PlanRoom';
+import {
+  FURNITURE, FREE_FURNITURE, tierFor, planScaleFor,
+  canPlace, firstFreeSpot, furnitureById, floorOf, formatNaira, ownedFurnitureIds,
+  placeAll, roomsOnFloor, slotsUsed,
+  parseRoomLayout, serializeRoomLayout, deskRectFor, planBounds,
+} from '../lib/plan';
 import {
   FaCaretRight, FaChevronUp, FaChevronDown, FaUserFriends,
   Sparkles, Send, Heart, MessageCircle, Zap, ArrowLeft,
@@ -793,7 +803,7 @@ const DESK_CUSTOMIZER_ITEMS = [
 //                position and not just a set of items.
 //
 // Nothing here is invented on the client: what is rendered is what was saved.
-const LAYOUT_VERSION = 1;
+const LAYOUT_VERSION = 1; // the version a base written before rooms carries
 
 const placementFor = (id) => {
   const preset = DEFAULT_DESK_LAYOUT.find((item) => item.id === id);
@@ -805,38 +815,39 @@ const placementFor = (id) => {
 // null means "nothing saved yet", which is different from "saved as empty": an
 // untouched base stands with its default desk, and only a deliberate change
 // replaces that.
+//
+// The contract itself lives in lib/plan.js (parseRoomLayout): v2 adds the rooms to
+// v1's desk and both are read here, so a base arranged before the plan view existed
+// opens exactly where its owner left it — with its furniture placed by the rules.
 const parseSavedLayout = (home) => {
   if (!home) return null;
 
-  const raw = home.roomLayout;
-  if (typeof raw === 'string' && raw.trim().startsWith('{')) {
-    try {
-      const parsed = JSON.parse(raw);
-      if (parsed && parsed.version === LAYOUT_VERSION && Array.isArray(parsed.items)) {
-        const items = parsed.items
-          .filter((item) => item && DREAM_DESK_ITEMS[item.id])
-          .map((item) => ({ id: item.id, x: Number(item.x) || 0, y: Number(item.y) || 0, zIndex: item.zIndex }));
-        if (items.length) return items;
-      }
-    } catch {
-      // An unreadable arrangement is treated as none rather than as a crash.
+  const parsed = parseRoomLayout(home.roomLayout);
+  if (parsed) {
+    const items = parsed.items.filter((item) => DREAM_DESK_ITEMS[item.id]);
+    const floor = parsed.floor.filter((item) => furnitureById(item.id));
+    if (items.length || floor.length) {
+      return { version: parsed.version, items, floor, tier: parsed.tier };
     }
   }
 
-  // A base written before the layout was serialised carries only the id list.
+  // A base written before the layout was serialised carries only the id list. The
+  // desk ids are put back where the default desk has them; the furniture ids are
+  // placed by the same rules a drag obeys, so the arrangement is stable across
+  // reloads rather than random.
   if (Array.isArray(home.furniture) && home.furniture.length) {
-    return home.furniture
+    const items = home.furniture
       .filter((id) => DREAM_DESK_ITEMS[id])
       .map((id) => ({ id, ...placementFor(id) }));
+    const floor = placeAll({
+      tier: tierFor(home.upgradeLevel),
+      ids: home.furniture.filter((id) => furnitureById(id)),
+    });
+    if (items.length || floor.length) return { version: LAYOUT_VERSION, items, floor, tier: null };
   }
 
   return null;
 };
-
-const serializeLayout = (items) => JSON.stringify({
-  version: LAYOUT_VERSION,
-  items: items.map(({ id, x, y, zIndex }) => ({ id, x: Math.round(x), y: Math.round(y), zIndex })),
-});
 
 // ─── Map Background — 3x3 around user, exact dreaming generation ─────────────
 // Hardcoded behavior: render the same procedural world rules as dreaming.js,
@@ -1138,15 +1149,98 @@ function DreamDeskPopup({ menuItems, activeDeskItem, onSelectItem, onClose, styl
   );
 }
 
+// ─── Room customiser: one card per mock sprite in public/Frames/User-base/Plan view ──
+// A card states exactly one of four facts — it is on the base, you own it, it is
+// locked by your tier, or it costs this much — and offers the one action that fact
+// allows. Prices are the demo naira prices from lib/plan.js.
+function FurnitureCard({ def, placed, owned, locked, hasSpot, busy, desktop, onPlace, onBuy, onStore, onRotate }) {
+  let action = { label: 'PLACE ON BASE', fn: () => onPlace(def.id), tone: '#ABD49E' };
+  if (placed) action = { label: 'STORE', fn: () => onStore(def.id), tone: '#ABD49E' };
+  else if (!owned && locked) action = { label: `TIER ${def.tier} ONLY`, fn: null, tone: 'rgba(171,212,158,0.45)' };
+  else if (!owned) action = { label: `BUY ${formatNaira(def.price)}`, fn: () => onBuy(def.id), tone: '#F4A261' };
+  else if (!hasSpot) action = { label: 'NO SPACE', fn: null, tone: 'rgba(171,212,158,0.45)' };
+
+  const fact = placed ? 'ON BASE' : owned ? 'OWNED' : formatNaira(def.price);
+
+  return (
+    <div
+      data-furniture={def.id}
+      style={{ border: '1px solid rgba(171,212,158,0.35)', background: '#101010', display: 'flex', flexDirection: 'column' }}
+    >
+      <div style={{
+        height: desktop ? 104 : 78, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: 10, background: '#151413',
+      }}>
+        <img
+          src={def.asset}
+          alt=""
+          aria-hidden="true"
+          style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+        />
+      </div>
+      <div style={{ padding: desktop ? 10 : 8, fontFamily: 'monospace', color: '#ABD49E', flex: 1, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ fontSize: desktop ? 12 : 10, letterSpacing: '0.12em' }}>{def.label}</div>
+        <div style={{ fontSize: desktop ? 10 : 9, opacity: 0.7, marginTop: 3, letterSpacing: '0.06em' }}>
+          {fact} · TIER {def.tier} · {def.w}×{def.h}
+        </div>
+        <div style={{ display: 'flex', gap: 6, marginTop: 'auto', paddingTop: 8 }}>
+          <button
+            type="button"
+            disabled={!action.fn || busy}
+            onClick={action.fn || undefined}
+            style={{
+              flex: 1,
+              background: action.fn ? action.tone : 'transparent',
+              border: `1px solid ${action.fn ? action.tone : 'rgba(171,212,158,0.4)'}`,
+              color: action.fn ? '#101010' : 'rgba(171,212,158,0.55)',
+              padding: '7px 8px', fontSize: desktop ? 10 : 9, letterSpacing: '0.1em',
+              cursor: action.fn ? 'pointer' : 'not-allowed', fontFamily: 'monospace',
+            }}
+          >
+            {action.label}
+          </button>
+          {placed ? (
+            <button
+              type="button"
+              aria-label={`Rotate ${def.label}`}
+              onClick={() => onRotate(def.id)}
+              style={{
+                background: '#101010', border: '1px solid #ABD49E', color: '#ABD49E',
+                padding: '7px 10px', fontSize: desktop ? 12 : 10, cursor: 'pointer',
+              }}
+            >
+              ↻
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Home Scene (frozen canvas with jungle + desk) ────────────────────────────
-function HomeScene({ activeDeskItem, setActiveDeskItem, username, onOpenKura, home, isSelf }) {
+function HomeScene({ activeDeskItem, setActiveDeskItem, username, onOpenKura, home, isSelf, viewerUsername = '', visitorNote = null }) {
   const [deskPopupOpen, setDeskPopupOpen] = useState(false);
   const [deskCustomizerOpen, setDeskCustomizerOpen] = useState(false);
+  const [customizerMode, setCustomizerMode] = useState('DESK');
   const [deskDrawerView, setDeskDrawerView] = useState(null);
+  // The plan view's own state: which floor you are looking at, which item is
+  // selected, and the items the demo checkout has unlocked this session.
+  const [floorNo, setFloorNo] = useState(1);
+  const [selectedFloorItem, setSelectedFloorItem] = useState(null);
+  const [demoOwned, setDemoOwned] = useState([]);
   // Start from what the owner saved, not from the default desk, so the first paint
   // of a base somebody has arranged is already their arrangement.
   const savedLayout = useMemo(() => parseSavedLayout(home), [home]);
-  const [deskItems, setDeskItems] = useState(() => savedLayout || DEFAULT_DESK_LAYOUT);
+  // The ladder: HomeBase.upgradeLevel (default 1) picks the plan. A base with no
+  // HomeBase row is level 1, which is why the desk always stands in a room.
+  const tier = useMemo(() => tierFor(home && home.upgradeLevel), [home]);
+  const theme = (home && home.theme) || 'jungle';
+  // A new base is not an empty rectangle: the tier ships a starter pair (RUG,
+  // PLANT) whose positions come from the same rules a drag obeys.
+  const starterFloor = useMemo(() => placeAll({ tier, floorNo: 1, ids: FREE_FURNITURE }), [tier]);
+  const [deskItems, setDeskItems] = useState(() => (savedLayout && savedLayout.items.length ? savedLayout.items : DEFAULT_DESK_LAYOUT));
+  const [floorItems, setFloorItems] = useState(() => (savedLayout && savedLayout.floor.length ? savedLayout.floor : starterFloor));
   const [ownedDeskItems, setOwnedDeskItems] = useState(['JOURNAL', 'RADIO', 'PORTFOLIO', 'SLUM BOOK']);
   const [deskCustomizerIndex, setDeskCustomizerIndex] = useState(0);
   const [draggedDeskItemId, setDraggedDeskItemId] = useState(null);
@@ -1159,7 +1253,6 @@ function HomeScene({ activeDeskItem, setActiveDeskItem, username, onOpenKura, ho
   const dragMovedRef = useRef(false);
   const suppressClickUntilRef = useRef(0);
   const [frozen, setFrozen] = useState(null);
-  const zoomedGrid = GRID_SIZE * ZOOM_FACTOR;
   const isDesktop = frozen ? frozen.w >= 1024 : false;
 
   const menuItems = useMemo(() => {
@@ -1175,32 +1268,134 @@ function HomeScene({ activeDeskItem, setActiveDeskItem, username, onOpenKura, ho
   // The saved arrangement arrives with the base (which is fetched), so it is adopted
   // when it lands, not only in the initial state.
   useEffect(() => {
-    if (savedLayout) setDeskItems(savedLayout);
-  }, [savedLayout]);
+    if (!savedLayout) {
+      setFloorItems(starterFloor);
+      return;
+    }
+    if (savedLayout.items.length) setDeskItems(savedLayout.items);
+    setFloorItems(savedLayout.floor.length ? savedLayout.floor : starterFloor);
+  }, [savedLayout, starterFloor]);
 
   // The handlers below run outside the render that owns `deskItems` — a drag's
   // listeners are attached on mousedown — so the current arrangement is kept in a
-  // ref to be saved from there.
+  // ref to be saved from there. The floor has the same problem for the same reason.
   const deskItemsRef = useRef(deskItems);
   useEffect(() => { deskItemsRef.current = deskItems; }, [deskItems]);
+  const floorItemsRef = useRef(floorItems);
+  useEffect(() => { floorItemsRef.current = floorItems; }, [floorItems]);
+
+  // How big the base is drawn. lib/plan.js owns the number because the desk's drag
+  // maths divides screen pixels by it: one scale, or a drag stops matching the item
+  // it is moving.
+  const planScale = useMemo(() => (frozen ? planScaleFor(tier, { w: frozen.w, h: frozen.h }) : 1), [frozen, tier]);
+  const planScaleRef = useRef(planScale);
+  useEffect(() => { planScaleRef.current = planScale; }, [planScale]);
+
+  // Where the desk ended up on screen, so the desk menu opens beside the desk and
+  // not beside a hardcoded offset that used to be the centre of the map.
+  const deskScreen = useMemo(() => {
+    if (!frozen) return null;
+    const desk = deskRectFor(tier, floorNo);
+    if (!desk) return null;
+    const bounds = planBounds(tier);
+    return {
+      x: frozen.w / 2 + (desk.x + 155 - bounds.w / 2) * planScale,
+      y: frozen.h / 2 + (desk.y + 127 - bounds.h / 2) * planScale,
+      size: 310 * planScale,
+    };
+  }, [frozen, tier, floorNo, planScale]);
 
   // Only the owner writes, and only after a deliberate change. Saving on mount would
   // let a visitor's default desk overwrite somebody's arranged one; the API refuses
   // it too, since PUT /api/home is login-required and scoped to the session's user.
-  const saveLayout = useCallback((items) => {
-    if (!isSelf || !items || !items.length) return;
+  //
+  // One serialisation, both scales: `roomLayout` (v2) carries the desk's items and
+  // the room's furniture, and `furniture` carries every equipped id — desk ids and
+  // floor ids together, because that list is what makes an item come back.
+  const saveLayout = useCallback((nextDeskItems, nextFloorItems) => {
+    if (!isSelf) return;
+    const desk = nextDeskItems || deskItemsRef.current;
+    const floor = nextFloorItems || floorItemsRef.current;
+    if (!desk.length && !floor.length) return;
     fetch('/api/home', {
       method: 'PUT',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        furniture: items.map((item) => item.id),
-        roomLayout: serializeLayout(items),
+        furniture: Array.from(new Set([...desk.map((item) => item.id), ...floor.map((item) => item.id)])),
+        roomLayout: serializeRoomLayout({ tier: tier.level, deskItems: desk, floorItems: floor, floorNo }),
       }),
     }).catch(() => {
       // A base that failed to save is still on screen, and the next change retries.
     });
-  }, [isSelf]);
+  }, [isSelf, tier, floorNo]);
+
+  // An upgrade moves the walls. What the new plan cannot hold is *stored* — taken off
+  // the floor, kept in `furniture` — never deleted, and what still fits stays exactly
+  // where the owner put it.
+  useEffect(() => {
+    setFloorItems((items) => {
+      const kept = items.filter((item) => furnitureById(item.id));
+      if (!kept.length) return kept;
+      const legal = [];
+      const broken = [];
+      kept.forEach((item) => {
+        const verdict = canPlace({
+          tier, floorNo: floorOf(item), items: kept, id: item.id,
+          x: item.x, y: item.y, rot: item.rot, ignoreId: item.id,
+        });
+        if (verdict.ok) legal.push(item); else broken.push(item);
+      });
+      if (!broken.length) return kept;
+      return placeAll({ tier, floorNo: 1, ids: broken.map((item) => item.id), items: legal });
+    });
+  }, [tier]);
+
+  const ownedFurniture = useMemo(
+    () => ownedFurnitureIds(home, demoOwned).filter((id) => furnitureById(id)),
+    [home, demoOwned]
+  );
+  const storedCount = ownedFurniture.filter((id) => !floorItems.some((item) => item.id === id)).length;
+
+  const placeFurniture = (id) => {
+    const spot = firstFreeSpot({ tier, floorNo, items: floorItems, id });
+    if (!spot) return false;
+    const next = [...floorItems, { id, x: spot.x, y: spot.y, rot: spot.rot || 0, floor: floorNo }];
+    setFloorItems(next);
+    saveLayout(deskItemsRef.current, next);
+    return true;
+  };
+
+  const storeFurniture = (id) => {
+    const next = floorItems.filter((item) => item.id !== id);
+    setFloorItems(next);
+    setSelectedFloorItem(null);
+    // Real ownership lives in the store, which is the money pass. Until then an id
+    // you have paid the demo checkout for stays available for the session, and every
+    // screen that offers it says so plainly.
+    setDemoOwned((prev) => (prev.includes(id) ? prev : [...prev, id]));
+    saveLayout(deskItemsRef.current, next);
+  };
+
+  const rotateFurniture = (id) => {
+    const item = floorItems.find((entry) => entry.id === id);
+    if (!item) return;
+    const rot = ((Number(item.rot) || 0) + 90) % 360;
+    const next = floorItems.map((entry) => (entry.id === id ? { ...entry, rot } : entry));
+    const verdict = canPlace({
+      tier, floorNo: floorOf(item), items: next, id, x: item.x, y: item.y, rot, ignoreId: id,
+    });
+    if (!verdict.ok) return;
+    setFloorItems(next);
+    saveLayout(deskItemsRef.current, next);
+  };
+
+  // A floor drag is a change to the base exactly like a desk drag is: committed
+  // under the same rules and written through the same single call.
+  const commitFloor = useCallback((next) => {
+    setFloorItems(next);
+    saveLayout(deskItemsRef.current, next);
+  }, [saveLayout]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -1239,16 +1434,19 @@ function HomeScene({ activeDeskItem, setActiveDeskItem, username, onOpenKura, ho
 
   const handleDragStartItem = (event, itemId) => {
     const point = 'touches' in event ? event.touches[0] : event;
+    const scale = planScaleRef.current || 1;
     const targetRect = event.currentTarget.getBoundingClientRect();
     setDraggedDeskItemId(itemId);
     setIsDraggingDeskItem(false);
     dragMovedRef.current = false;
     dragStartPointRef.current = { x: point.clientX, y: point.clientY };
+    // The desk stands inside the plan, which is drawn at planScale, so the rendered
+    // box is in screen pixels while item coordinates are the desk's own units.
     setDragOffset({
-      x: point.clientX - targetRect.left,
-      y: point.clientY - targetRect.top,
+      x: (point.clientX - targetRect.left) / scale,
+      y: (point.clientY - targetRect.top) / scale,
     });
-    setDragItemSize({ width: targetRect.width, height: targetRect.height });
+    setDragItemSize({ width: targetRect.width / scale, height: targetRect.height / scale });
   };
 
   const shouldSuppressItemClick = () => {
@@ -1268,6 +1466,7 @@ function HomeScene({ activeDeskItem, setActiveDeskItem, username, onOpenKura, ho
       const deskSurface = deskSurfaceRef.current;
       if (!deskSurface) return;
 
+      const surfaceScale = planScaleRef.current || 1;
       const rect = deskSurface.getBoundingClientRect();
       const deltaX = clientX - dragStartPointRef.current.x;
       const deltaY = clientY - dragStartPointRef.current.y;
@@ -1279,8 +1478,12 @@ function HomeScene({ activeDeskItem, setActiveDeskItem, username, onOpenKura, ho
       }
       if (!dragMovedRef.current) return;
 
-      const nextX = Math.max(0, Math.min(rect.width - dragItemSize.width, clientX - rect.left - dragOffset.x));
-      const nextY = Math.max(0, Math.min(rect.height - dragItemSize.height, clientY - rect.top - dragOffset.y));
+      // Screen pixels back into the desk's own units (see handleDragStartItem). At
+      // scale 1 this is the arithmetic the desk has always used.
+      const surfaceW = rect.width / surfaceScale;
+      const surfaceH = rect.height / surfaceScale;
+      const nextX = Math.max(0, Math.min(surfaceW - dragItemSize.width, (clientX - rect.left) / surfaceScale - dragOffset.x));
+      const nextY = Math.max(0, Math.min(surfaceH - dragItemSize.height, (clientY - rect.top) / surfaceScale - dragOffset.y));
 
       setDeskItems((items) => items.map((item) => (
         item.id === draggedDeskItemId ? { ...item, x: nextX, y: nextY } : item
@@ -1320,6 +1523,15 @@ function HomeScene({ activeDeskItem, setActiveDeskItem, username, onOpenKura, ho
       window.removeEventListener('touchend', handleEnd);
     };
   }, [draggedDeskItemId, dragOffset, dragItemSize]);
+
+  // The store's checkout is not wired yet (item prices are still strings like
+  // '90 DT' and ownership resets), so buying furniture is a demo: the item is
+  // unlocked for the session and placed with the same rules everything else obeys.
+  // The panel says out loud that no payment was taken.
+  const buyFurniture = (id) => {
+    setDemoOwned((prev) => (prev.includes(id) ? prev : [...prev, id]));
+    return placeFurniture(id);
+  };
 
   const renderDrawerContent = (drawerKey) => {
     if (drawerKey === 'journal') {
@@ -1395,50 +1607,172 @@ function HomeScene({ activeDeskItem, setActiveDeskItem, username, onOpenKura, ho
           <div style={{ position: 'relative', width: frozen.w, height: frozen.h }}>
             <MapBackground cw={frozen.w} ch={frozen.h} username={username} />
 
-            {/* Dream desk — locked to the exact center grid cell */}
+            {/* The base, from above: the tier's rooms with the desk standing in one
+                of them. The desk is passed in as `deskSlot`, so it is still the same
+                component — same drawers, same drag, same single save — at the room
+                scale as it was when it floated on the map on its own. */}
+            <PlanRoom
+              tier={tier}
+              floorNo={floorNo}
+              theme={theme}
+              items={floorItems}
+              editable={isSelf}
+              scale={planScale}
+              ownerUsername={username}
+              viewerUsername={viewerUsername}
+              isSelf={isSelf}
+              visitorNote={visitorNote}
+              selectedId={selectedFloorItem}
+              onCommit={commitFloor}
+              onSelectItem={(id) => setSelectedFloorItem((cur) => (cur === id ? null : id))}
+              deskSlot={(
+                <div
+                  style={{ width: 310, height: 255, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  onClick={e => {
+                    e.stopPropagation();
+                    if (!isDraggingDeskItem) setDeskPopupOpen(true);
+                  }}
+                >
+                  <DeskScene
+                    deskItems={deskItems}
+                    activeDeskItem={activeDeskItem}
+                    onDeskClick={() => {
+                      if (!isDraggingDeskItem) setDeskPopupOpen(true);
+                    }}
+                    onOpenCustomizer={() => {
+                      setDeskPopupOpen(false);
+                      setDeskCustomizerOpen(true);
+                    }}
+                    onOpenKura={onOpenKura}
+                    onInteractItem={handleSelectDeskItem}
+                    onDragStartItem={handleDragStartItem}
+                    deskSurfaceRef={deskSurfaceRef}
+                    shouldSuppressItemClick={shouldSuppressItemClick}
+                    desktop={isDesktop}
+                  />
+                </div>
+              )}
+            />
+
+            {/* The property, in one line: what tier this is, which rooms it has, how
+                full it is, and how much of the plot it takes on the map. */}
             <div
+              data-plan-hud=""
               style={{
-                position: 'absolute',
-                left: '50%',
-                top: '50%',
-                transform: 'translate(-50%, -50%)',
-                zIndex: 4,
-                width: zoomedGrid,
-                height: zoomedGrid,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-              onClick={e => {
-                e.stopPropagation();
-                if (!isDraggingDeskItem) setDeskPopupOpen(true);
+                position: 'absolute', left: isDesktop ? 22 : 10, top: isDesktop ? 20 : 10,
+                zIndex: 9, fontFamily: 'monospace', color: '#ABD49E', pointerEvents: 'none',
+                border: '1px solid #ABD49E', background: 'rgba(16,16,16,0.92)',
+                padding: isDesktop ? '8px 12px' : '6px 8px',
               }}
             >
-              <DeskScene
-                deskItems={deskItems}
-                activeDeskItem={activeDeskItem}
-                onDeskClick={() => {
-                  if (!isDraggingDeskItem) setDeskPopupOpen(true);
-                }}
-                onOpenCustomizer={() => {
-                  setDeskPopupOpen(false);
-                  setDeskCustomizerOpen(true);
-                }}
-                onOpenKura={onOpenKura}
-                onInteractItem={handleSelectDeskItem}
-                onDragStartItem={handleDragStartItem}
-                deskSurfaceRef={deskSurfaceRef}
-                shouldSuppressItemClick={shouldSuppressItemClick}
-                desktop={isDesktop}
-              />
+              <div style={{
+                fontSize: isDesktop ? 12 : 10, letterSpacing: '0.14em', whiteSpace: 'nowrap',
+              }}>
+                TIER {tier.level} · {tier.name}
+              </div>
+              <div style={{ marginTop: 6, fontSize: isDesktop ? 10 : 9, letterSpacing: '0.1em', opacity: 0.85 }}>
+                {roomsOnFloor(tier, floorNo).map((room) => room.label).join(' · ')}
+              </div>
+              <div data-plan-stats="" style={{ marginTop: 4, fontSize: isDesktop ? 10 : 9, letterSpacing: '0.1em', opacity: 0.85 }}>
+                FURNITURE {slotsUsed(floorItems)}/{tier.slots}
+                {storedCount ? ` · ${storedCount} STORED` : ''}
+                {' · '}PLOT {tier.plot}
+              </div>
             </div>
 
+            {/* A duplex is a plan that stacks, so the plan gets a floor switch. */}
+            {tier.floors.length > 1 && (
+              <div
+                data-plan-floors=""
+                style={{
+                  position: 'absolute', left: '50%', top: isDesktop ? 20 : 10, transform: 'translateX(-50%)',
+                  display: 'flex', zIndex: 9, fontFamily: 'monospace',
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                {tier.floors.map((f) => (
+                  <button
+                    key={f.no}
+                    type="button"
+                    aria-label={`Show floor ${f.no} — ${f.label}`}
+                    onClick={() => { setFloorNo(f.no); setSelectedFloorItem(null); }}
+                    style={{
+                      background: floorNo === f.no ? '#ABD49E' : 'rgba(16,16,16,0.92)',
+                      color: floorNo === f.no ? '#101010' : '#ABD49E',
+                      border: '1px solid #ABD49E', padding: isDesktop ? '8px 14px' : '6px 10px',
+                      fontSize: isDesktop ? 11 : 9, letterSpacing: '0.14em', cursor: 'pointer',
+                    }}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Tapping a piece of furniture offers the two things you can do to it. */}
+            {isSelf && selectedFloorItem && furnitureById(selectedFloorItem) && (
+              <div
+                data-plan-action=""
+                style={{
+                  position: 'absolute', left: '50%', bottom: isDesktop ? 104 : 78,
+                  transform: 'translateX(-50%)', display: 'flex', gap: 6, zIndex: 9, fontFamily: 'monospace',
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <span style={{
+                  background: '#ABD49E', color: '#101010', padding: isDesktop ? '8px 12px' : '6px 8px',
+                  fontSize: isDesktop ? 11 : 9, letterSpacing: '0.14em', whiteSpace: 'nowrap',
+                }}>
+                  {furnitureById(selectedFloorItem).label}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => rotateFurniture(selectedFloorItem)}
+                  style={{
+                    background: '#101010', color: '#ABD49E', border: '1px solid #ABD49E',
+                    padding: isDesktop ? '8px 12px' : '6px 8px', fontSize: isDesktop ? 11 : 9,
+                    letterSpacing: '0.14em', cursor: 'pointer',
+                  }}
+                >
+                  ROTATE
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Store ${furnitureById(selectedFloorItem).label} off the base`}
+                  onClick={() => storeFurniture(selectedFloorItem)}
+                  style={{
+                    background: '#101010', color: '#ABD49E', border: '1px solid #ABD49E',
+                    padding: isDesktop ? '8px 12px' : '6px 8px', fontSize: isDesktop ? 11 : 9,
+                    letterSpacing: '0.14em', cursor: 'pointer',
+                  }}
+                >
+                  STORE
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedFloorItem(null)}
+                  style={{
+                    background: '#101010', color: '#ABD49E', border: '1px solid #ABD49E',
+                    padding: isDesktop ? '8px 12px' : '6px 8px', fontSize: isDesktop ? 11 : 9,
+                    letterSpacing: '0.14em', cursor: 'pointer',
+                  }}
+                >
+                  DONE
+                </button>
+              </div>
+            )}
+            {/* The desk's own menu, anchored to where the desk actually stands in the
+                plan (it used to be a fixed offset from the centre of the map). */}
             {deskPopupOpen && (
               <div
                 style={{
                   position: 'absolute',
-                  left: isDesktop ? `calc(50% + 250px)` : `calc(50% + 170px)`,
-                  top: isDesktop ? `calc(50% - 130px)` : `calc(50% - 100px)`,
+                  left: deskScreen
+                    ? (isDesktop ? deskScreen.x + deskScreen.size * 0.5 + 12 : 12)
+                    : '50%',
+                  top: deskScreen
+                    ? (isDesktop ? deskScreen.y - 140 : deskScreen.y + 70)
+                    : '50%',
                   zIndex: 20,
                 }}
                 onClick={e => e.stopPropagation()}
@@ -1541,6 +1875,107 @@ function HomeScene({ activeDeskItem, setActiveDeskItem, username, onOpenKura, ho
                     ×
                   </button>
                 </div>
+
+                {/* DESK | ROOM — one customiser, the two scales of the same base.
+                    Same rules, same save; the desk is not forked into a second editor. */}
+                <div
+                  data-customizer-modes=""
+                  style={{
+                    position: 'absolute', left: '50%', top: isDesktop ? 104 : 74,
+                    transform: 'translateX(-50%)', display: 'flex', zIndex: 10,
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {['DESK', 'ROOM'].map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      aria-label={`Customise the ${mode.toLowerCase()}`}
+                      onClick={() => setCustomizerMode(mode)}
+                      style={{
+                        background: customizerMode === mode ? '#ABD49E' : '#101010',
+                        color: customizerMode === mode ? '#101010' : '#ABD49E',
+                        border: '1px solid #ABD49E',
+                        padding: isDesktop ? '8px 16px' : '6px 12px',
+                        fontFamily: 'monospace', fontSize: isDesktop ? 12 : 10,
+                        letterSpacing: '0.14em', cursor: 'pointer',
+                      }}
+                    >
+                      {mode}
+                    </button>
+                  ))}
+                </div>
+
+                {/* The room half of the customiser: the catalogue, what you own, what
+                    your tier allows, and the demo checkout the money pass replaces. */}
+                {customizerMode === 'ROOM' && (
+                  <div
+                    data-customizer-room=""
+                    style={{ position: 'absolute', inset: 0, background: '#101010', zIndex: 8, overflowY: 'auto' }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div style={{
+                      paddingTop: isDesktop ? 190 : 152, paddingInline: isDesktop ? 56 : 14,
+                      paddingBottom: 150, maxWidth: 1180, margin: '0 auto',
+                      fontFamily: 'monospace', color: '#ABD49E',
+                    }}
+                    >
+                      <div style={{ fontSize: isDesktop ? 14 : 11, letterSpacing: '0.16em' }}>
+                        FURNISHING · TIER {tier.level} · {tier.name}
+                      </div>
+                      <div style={{ fontSize: isDesktop ? 11 : 9, letterSpacing: '0.1em', opacity: 0.75, marginTop: 6 }}>
+                        {slotsUsed(floorItems)} OF {tier.slots} PLACED
+                        {storedCount ? ` · ${storedCount} IN STORAGE` : ''}
+                        {' · '}{roomsOnFloor(tier, floorNo).map((room) => room.label).join(' · ')}
+                      </div>
+
+                      <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: isDesktop ? 'repeat(auto-fill, minmax(210px, 1fr))' : '1fr 1fr',
+                        gap: 10, marginTop: 16,
+                      }}
+                      >
+                        {FURNITURE.map((def) => {
+                          const placed = floorItems.some((item) => item.id === def.id);
+                          const owned = ownedFurniture.includes(def.id);
+                          const locked = def.tier > tier.level;
+                          const hasSpot = placed || Boolean(firstFreeSpot({ tier, floorNo, items: floorItems, id: def.id }));
+                          return (
+                            <FurnitureCard
+                              key={def.id}
+                              def={def}
+                              placed={placed}
+                              owned={owned}
+                              locked={locked}
+                              hasSpot={hasSpot}
+                              busy={false}
+                              desktop={isDesktop}
+                              onPlace={placeFurniture}
+                              onBuy={buyFurniture}
+                              onStore={storeFurniture}
+                              onRotate={rotateFurniture}
+                            />
+                          );
+                        })}
+                      </div>
+
+                      <div style={{
+                        marginTop: 18, border: '1px solid rgba(171,212,158,0.35)',
+                        padding: isDesktop ? 14 : 10, fontSize: isDesktop ? 10 : 9,
+                        lineHeight: 1.5, letterSpacing: '0.08em', opacity: 0.85,
+                      }}
+                      >
+                        DEMO CHECKOUT — NOTHING IS CHARGED YET. THE PRICES ARE PLACEHOLDERS AND AN
+                        ITEM YOU UNLOCK STAYS ON THIS DEVICE UNTIL THE STORE&apos;S REAL PURCHASE PATH
+                        LANDS. WHAT IS REAL: PLACING, ROTATING, STORING AND THE PLAN ITSELF, ALL
+                        SAVED TO YOUR BASE.
+                      </div>
+                      <div style={{ marginTop: 12, fontSize: isDesktop ? 10 : 9, letterSpacing: '0.1em', opacity: 0.75 }}>
+                        BIGGER HOME? <a href="/home" style={{ color: '#ABD49E' }}>THE PROPERTY OFFICE</a> HAS THE NEXT TIER.
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 <div
                   style={{
@@ -2657,6 +3092,11 @@ function UserBase({ username: ssrUsername, base }) {
   const [activeDeskItem, setActiveDeskItem]   = useState(null);
   const [connectionState, setConnectionState] = useState('stranger');
   const [visitResult, setVisitResult]         = useState(null);
+  // Who is standing here: the plan view draws the visitor's own avatar at the door
+  // when the base is somebody else's. The session slice is the same source of truth
+  // NavBar reads, and a logged-out viewer simply gets no second avatar.
+  const viewerUsername = useSelector((state) => state.registerSlice.username);
+
 
   // Everything the drawer shows is the owner's own record, read through
   // GET /api/homes/u/:username — the same allow-listed public fields anyone else
@@ -2758,7 +3198,7 @@ function UserBase({ username: ssrUsername, base }) {
 
       {/* Content */}
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
-        {activeTab === 'home'   && <HomeScene activeDeskItem={activeDeskItem} setActiveDeskItem={setActiveDeskItem} username={username} onOpenKura={() => setActiveTab('kura')} home={base && base.home} isSelf={isSelf} />}
+        {activeTab === 'home'   && <HomeScene activeDeskItem={activeDeskItem} setActiveDeskItem={setActiveDeskItem} username={username} onOpenKura={() => setActiveTab('kura')} home={base && base.home} isSelf={isSelf} viewerUsername={viewerUsername} visitorNote={profile.visitNote} />}
         {activeTab === 'kura'   && <KuraTab />}
         {activeTab === 'dreams' && <DreamsTab ownerId={owner ? owner._id : null} />}
         {activeTab === 'dojo'   && <DojoTab />}

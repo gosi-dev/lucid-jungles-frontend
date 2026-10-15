@@ -23,7 +23,7 @@ rather than an impression. Screenshots are written alongside the numbers.
     npm run verify:entities     # entity lists + profiles: layout, actions, destinations
     npm run verify:shell        # the shell ten routes share, /chat end to end, storage
     npm run verify:profile      # the profile a VIEW PROFILE action opens
-    npm run verify:base         # a base: the face, the visit counts, the knock
+    npm run verify:base         # a base: the face, the visit counts, the knock, the plan
 
 On Node 20 the flag is required, so run the files directly:
 
@@ -85,6 +85,35 @@ the placement as JSON, `furniture` keeps the equipped ids), a reload stands the 
 was left rather than where the default desk puts it, and a visitor dragging the same desk
 changes nothing on the owner's record. Before this, the desk was component state: the
 arrangement existed until the tab was closed.
+The third part is about the base being a *home*: a plan view of the tier's rooms with the
+desk standing inside one of them (`lib/plan.js` + `components/PlanRoom.jsx`, described in
+`LJ Prod Docs/LUCID_JUNGLES_BASE_PLAN.md`). What is measured, all of it against a fresh
+`GET /api/homes/u/:username`:
+
+- the plan is drawn at the tier `HomeBase.upgradeLevel` stores, its rooms are the tier's
+  rooms, and the desk (and its items) are mounted inside one of them;
+- the owner's monogram avatar stands in the room; on somebody else's base the owner is at
+  home and the viewer's own avatar is at the door;
+- a real mouse drag of furniture is written to `roomLayout` **v2** — `version: 2`, the new
+  `floor` array carrying the same x/y that is on screen, and `items` still carrying the desk
+  ids, which is what keeps every v1 base (and every older reader) working;
+- an illegal drop **outside the rooms is refused**: the stored layout is byte-identical
+  afterwards and the item is back at its last legal position;
+- a reload restores the furniture, and a visitor cannot move it or the desk;
+- on `/home`, the property office lists all five tiers of the ladder with a plan drawing,
+  exactly one is marked `YOU LIVE HERE` (and disabled, and matching the stored tier), the
+  listing's plan names the rooms the base itself draws, moving in through the UI is recorded
+  on `upgradeLevel`, the base redraws around the new tier — and then the tier is **put back**
+  so the suite can run again (the same courtesy `verify-shell.js` pays its message).
+
+Two traps this part of the suite documents, both of which made the numbers lie before they
+were found. `[data-avatar]` now also matches the people the *plan* draws, so the drawer's own
+face is read only from avatars outside `[data-plan-stage]`; and a draggable sprite must not be
+an `<img>` that can be picked up — a native image drag swallows every later
+`mousemove`/`mouseup`, which is exactly what a drag that "moved on screen and never saved"
+turned out to be.
+
+
 
 ## Notes
 

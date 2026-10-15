@@ -83,7 +83,10 @@ const LAYOUT = `(() => {
   const leafEls = (text) => leaves.filter(el => (el.textContent || '').trim().toUpperCase() === text);
   const leafText = (text) => leafEls(text).length;
 
-  const avatars = [...document.querySelectorAll('#__next [data-avatar]')];
+  // The plan view draws people too (the owner at home, a visitor at the door), so the
+  // drawer's own face is read from the avatars OUTSIDE the plan stage.
+  const planAvatars = [...document.querySelectorAll('#__next [data-plan-stage] [data-avatar]')];
+  const avatars = [...document.querySelectorAll('#__next [data-avatar]')].filter(el => !el.closest('[data-plan-stage]'));
   const strip = avatars.length ? avatars[0].closest('button') : null;
 
   // The tab bar is the page's only row of four buttons; only the active tab draws
@@ -116,6 +119,13 @@ const LAYOUT = `(() => {
       icons: tabBar ? tabBar.querySelectorAll('svg').length : 0,
       label: tabBar ? (tabBar.textContent || '').trim().toUpperCase() : null,
     },
+    // Who the plan view has standing in it, by name: presence is asserted on the
+    // attributes the component actually writes, not on a picture.
+    planAvatars: planAvatars.map(el => ({
+      name: el.getAttribute('data-avatar-name'),
+      kind: el.getAttribute('data-avatar'),
+      presence: el.closest('[data-presence]') ? el.closest('[data-presence]').getAttribute('data-presence') : null,
+    })),
     avatars: avatars.map(el => ({
       kind: el.getAttribute('data-avatar'),
       name: el.getAttribute('data-avatar-name'),
@@ -139,7 +149,7 @@ const LAYOUT = `(() => {
 })()`;
 
 const OPEN_DRAWER = `(() => {
-  const avatar = document.querySelector('#__next [data-avatar]');
+  const avatar = [...document.querySelectorAll('#__next [data-avatar]')].find(el => !el.closest('[data-plan-stage]'));
   const strip = avatar ? avatar.closest('button') : null;
   if (!strip) return { clicked: false };
   strip.click();
@@ -152,6 +162,60 @@ const CLICK_CTA = `(() => {
   if (!el) return { clicked: false };
   el.click();
   return { clicked: true };
+})()`;
+
+// ── The plan view ─────────────────────────────────────────────────────────────
+// A base read as a *home*: which tier's rooms are drawn, where the desk stands in
+// them, what furniture is on the floor, and who is standing in the room. Every
+// number here is compared against GET /api/homes/u/:username in the checks below.
+const PLAN = `(() => {
+  const stage = document.querySelector('#__next [data-plan-stage]');
+  const hud = document.querySelector('#__next [data-plan-hud]');
+  const num = (v) => Math.round(parseFloat(v) || 0);
+  const items = [...document.querySelectorAll('#__next [data-plan-item]')].map(el => {
+    const r = el.getBoundingClientRect();
+    return {
+      id: el.getAttribute('data-plan-item'),
+      left: num(el.style.left), top: num(el.style.top),
+      w: Math.round(r.width),
+      x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2),
+    };
+  });
+  return {
+    staged: Boolean(stage),
+    tier: stage ? Number(stage.getAttribute('data-plan-tier')) : null,
+    scale: stage ? Number(stage.getAttribute('data-plan-scale')) : null,
+    rooms: [...document.querySelectorAll('#__next [data-room]')].map(el => el.getAttribute('data-room')),
+    roomLabels: [...document.querySelectorAll('#__next [data-room]')].map(el => (el.textContent || '').trim()),
+    deskInRoom: Boolean(document.querySelector('#__next [data-plan-desk]')),
+    deskItems: document.querySelectorAll('#__next [data-plan-desk] [aria-label^="Open "]').length,
+    items,
+    presence: [...document.querySelectorAll('#__next [data-presence]')].map(el => ({
+      kind: el.getAttribute('data-presence'),
+      name: el.querySelector('[data-avatar]') ? el.querySelector('[data-avatar]').getAttribute('data-avatar-name') : null,
+    })),
+    floors: [...document.querySelectorAll('#__next [data-plan-floors] button')].map(b => (b.textContent || '').trim()),
+    hud: hud ? hud.textContent.replace(/[\\s]+/g, ' ').trim().toUpperCase() : null,
+  };
+})()`;
+
+// The property office: the ladder as a listing on /home.
+const OFFICE = `(() => {
+  const office = document.querySelector('#__next [data-property-office]');
+  if (!office) return { present: false };
+  const listings = [...office.querySelectorAll('[data-listing]')].map(card => {
+    const button = card.querySelector('button');
+    const plan = card.querySelector('svg');
+    return {
+      level: Number(card.getAttribute('data-listing')),
+      text: (card.textContent || '').replace(/[\\s]+/g, ' ').trim().toUpperCase(),
+      planLabel: plan ? (plan.getAttribute('aria-label') || '') : '',
+      planRects: card.querySelectorAll('svg rect').length,
+      action: button ? (button.textContent || '').replace(/[\\s]+/g, ' ').trim().toUpperCase() : null,
+      disabled: button ? button.disabled : null,
+    };
+  });
+  return { present: true, listings };
 })()`;
 
 (async () => {
@@ -271,6 +335,27 @@ const CLICK_CTA = `(() => {
   await setViewport(c, 1440, 900);
   await c.goto(`${BASE}/${SELF_USERNAME}`, 3500);
   await sleep(1800);
+
+  // Start the station from a known arrangement. The subject of this check is "a drag
+  // is saved", not "there is room to drag": repeated runs walk the desk into the
+  // surface's corner, where the same delta clamps to nothing and the check would
+  // report a bug that is really just where the last run left it. Only the JOURNAL's
+  // position is reset; the furniture the base carries is left alone.
+  const resetRaw = await c.eval(`fetch('/api/homes/u/${SELF_USERNAME}',{credentials:'include'}).then(r=>r.json()).then(b=>b.data.home.roomLayout)`);
+  let resetLayout = null;
+  try {
+    const parsed = resetRaw && resetRaw.trim().startsWith('{') ? JSON.parse(resetRaw) : null;
+    if (parsed && Array.isArray(parsed.items)) {
+      parsed.items = parsed.items.map(i => (i.id === 'JOURNAL' ? { ...i, x: 110, y: 28 } : i));
+      resetLayout = JSON.stringify(parsed);
+    }
+  } catch { resetLayout = null; }
+  if (resetLayout) {
+    await c.eval(`fetch('/api/home',{method:'PUT',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({roomLayout:${JSON.stringify(resetLayout)}})}).then(r=>r.status)`);
+    await c.goto(`${BASE}/${SELF_USERNAME}`, 3500);
+    await sleep(2000);
+  }
+
   const before = await c.eval(deskItem('JOURNAL'));
   ok('desk: the owner has a desk to arrange', !!before, before ? JSON.stringify(before) : 'no JOURNAL on the desk');
   let moved = null;
@@ -308,6 +393,106 @@ const CLICK_CTA = `(() => {
     await shot(c, '/tmp/shot_base_desk_reloaded.png');
   }
 
+  // ── The plan view: the base drawn as a home ───────────────────────────────
+  // The desk used to *be* the base. It now stands in a room, and what the room shows
+  // has to be what HomeBase says: the tier's rooms, the furniture the base carries,
+  // and a person standing in it. All three are read off the DOM and compared with a
+  // fresh GET /api/homes/u/:username.
+  await setViewport(c, 1440, 900);
+  await c.goto(`${BASE}/${SELF_USERNAME}`, 3500);
+  await sleep(2200);
+  const plan0 = await c.eval(PLAN);
+  const home0 = await c.eval(`fetch('/api/homes/u/${SELF_USERNAME}',{credentials:'include'}).then(r=>r.json()).then(b=>b.data.home)`);
+  const tier0 = (home0 && home0.upgradeLevel) || 1;
+  let saved0 = null;
+  try {
+    saved0 = home0 && typeof home0.roomLayout === 'string' && home0.roomLayout.trim().startsWith('{')
+      ? JSON.parse(home0.roomLayout)
+      : null;
+  } catch { saved0 = null; }
+  console.log('   plan (owner)    :', JSON.stringify({ tier: plan0.tier, scale: plan0.scale, rooms: plan0.rooms, items: plan0.items.length, presence: plan0.presence }));
+  ok('plan: the base is drawn as a plan at the tier HomeBase stores',
+    plan0.staged === true && plan0.tier === tier0,
+    `page tier ${plan0.tier} vs api upgradeLevel ${tier0}`);
+  ok('plan: the tier\'s rooms are on screen, with the desk standing in one of them',
+    plan0.rooms.length >= 1 && plan0.deskInRoom === true && plan0.deskItems >= 4,
+    `rooms ${JSON.stringify(plan0.rooms)}, desk in room ${plan0.deskInRoom}, ${plan0.deskItems} desk items`);
+  ok('plan: the header says which tier you are standing in',
+    !!plan0.hud && plan0.hud.includes(`TIER ${tier0}`),
+    plan0.hud || 'no HUD');
+  ok('plan: the owner stands in their own room',
+    plan0.presence.some(p => p.kind === 'owner' && p.name === SELF_USERNAME.toLowerCase()),
+    JSON.stringify(plan0.presence));
+  ok('plan: the floor shows what the base carries (v2 floor array, or the tier starter set)',
+    saved0 && Array.isArray(saved0.floor)
+      ? saved0.floor.length === plan0.items.length
+      : plan0.items.length >= 1,
+    saved0 && Array.isArray(saved0.floor)
+      ? `saved ${saved0.floor.length} vs on screen ${plan0.items.length}`
+      : `unsaved base, starter set of ${plan0.items.length}`);
+  await shot(c, '/tmp/shot_base_plan.png');
+
+  // ── Furniture: the rules, and the fact that a placement is saved ──────────
+  // The same two claims the desk gets, made about the floor: a legal drag is written
+  // to roomLayout v2 and comes back on reload; an illegal one is refused and changes
+  // nothing. Both are real mouse drags inside the scaled plan.
+  const rug0 = plan0.items.find(i => i.id === 'RUG') || plan0.items[0] || null;
+  let spot = rug0;
+  let movedPlan = null;
+  if (rug0) {
+    // Which direction is legal depends on where the last run left the furniture, so
+    // the probe tries both ways along the axes and takes the one that moves.
+    const tries = [[30, 24], [-30, -24], [0, 30], [0, -30]];
+    for (const [dx, dy] of tries) {
+      if (!spot) break;
+      await drag(c, { x: spot.x, y: spot.y }, { x: spot.x + dx, y: spot.y + dy });
+      await sleep(1400);
+      const now = await c.eval(PLAN);
+      const item = now.items.find(i => i.id === rug0.id);
+      if (item && (item.left !== spot.left || item.top !== spot.top)) { movedPlan = now; spot = item; break; }
+      if (item) spot = item;
+    }
+    ok('plan: dragging furniture across the floor moves it on screen',
+      !!movedPlan,
+      movedPlan ? `${rug0.left},${rug0.top} -> ${spot.left},${spot.top}` : 'no direction moved the item');
+
+    const rawAfter = await c.eval(`fetch('/api/homes/u/${SELF_USERNAME}',{credentials:'include'}).then(r=>r.json()).then(b=>b.data.home.roomLayout)`);
+    let written = null;
+    try { written = rawAfter ? JSON.parse(rawAfter) : null; } catch { written = null; }
+    const savedFloorItems = written && Array.isArray(written.floor) ? written.floor : null;
+    const savedRug = savedFloorItems ? savedFloorItems.find(i => i.id === rug0.id) : null;
+    ok('plan: the placement is written to roomLayout v2 (floor array, version 2)',
+      !!written && written.version === 2 && Array.isArray(written.items) && Array.isArray(written.floor),
+      written ? `version ${written.version}, items ${(written.items || []).length}, floor ${(written.floor || []).length}` : 'unreadable roomLayout');
+    ok('plan: the saved position is the position on screen',
+      !!savedRug && !!spot && savedRug.x === spot.left && savedRug.y === spot.top,
+      savedRug ? `saved ${savedRug.x},${savedRug.y} vs on screen ${spot && spot.left},${spot && spot.top}` : 'the item is not in the floor array');
+    ok('plan: the equipped list still carries the desk items (v1 compatibility)',
+      !!written && Array.isArray(written.items) && written.items.some(i => i.id === 'JOURNAL'),
+      written ? JSON.stringify((written.items || []).map(i => i.id)) : 'no layout');
+
+    // An illegal drop: far outside the rooms, out over the jungle.
+    const beforeIllegal = await c.eval(`fetch('/api/homes/u/${SELF_USERNAME}',{credentials:'include'}).then(r=>r.json()).then(b=>b.data.home.roomLayout)`);
+    await drag(c, { x: spot.x, y: spot.y }, { x: spot.x - 320, y: spot.y - 220 });
+    await sleep(1600);
+    const refused = await c.eval(PLAN);
+    const afterIllegal = await c.eval(`fetch('/api/homes/u/${SELF_USERNAME}',{credentials:'include'}).then(r=>r.json()).then(b=>b.data.home.roomLayout)`);
+    const still = refused.items.find(i => i.id === rug0.id);
+    ok('plan: a drop outside the rooms is refused and nothing is written',
+      beforeIllegal === afterIllegal && !!still && still.left === spot.left && still.top === spot.top,
+      `record ${beforeIllegal === afterIllegal ? 'unchanged' : 'CHANGED'}; the item is back at ${still && still.left},${still && still.top}`);
+
+    // The same proof the desk gets: come back and find it where it was left.
+    await c.goto(`${BASE}/${SELF_USERNAME}`, 3500);
+    await sleep(2200);
+    const reloadedPlan = await c.eval(PLAN);
+    const reloadedRug = reloadedPlan.items.find(i => i.id === rug0.id);
+    ok('plan: a reload restores the furniture where it was left',
+      !!reloadedRug && reloadedRug.left === spot.left && reloadedRug.top === spot.top,
+      reloadedRug ? `${reloadedRug.left},${reloadedRug.top} vs saved ${spot.left},${spot.top}` : 'no furniture after the reload');
+    await shot(c, '/tmp/shot_base_plan_furnished.png');
+  }
+
   // A visitor may stand in the base, but the arrangement is not theirs to change.
   const visitorHomeBefore = await c.eval(`fetch('/api/homes/u/${USERNAME}',{credentials:'include'}).then(r=>r.json()).then(b=>b.data.home)`);
   await c.goto(`${BASE}/${USERNAME}`, 3000);
@@ -319,6 +504,97 @@ const CLICK_CTA = `(() => {
   ok('desk: a visitor dragging the desk changes nothing on the owner\'s record',
     JSON.stringify(visitorHomeBefore) === JSON.stringify(visitorHomeAfter),
     `${JSON.stringify(visitorHomeBefore)} -> ${JSON.stringify(visitorHomeAfter)}`);
+
+  // ── The same room, seen by a visitor ──────────────────────────────────────
+  // Standing in somebody's base now means standing in their room: their furniture,
+  // their face at home, and yours at the door — and none of it is yours to move.
+  const visitorPlan = await c.eval(PLAN);
+  console.log('   plan (visitor)  :', JSON.stringify({ tier: visitorPlan.tier, items: visitorPlan.items.length, presence: visitorPlan.presence }));
+  ok('plan: a visitor sees the owner at home and themselves at the door',
+    visitorPlan.presence.some(p => p.kind === 'owner' && p.name === USERNAME.toLowerCase())
+    && visitorPlan.presence.some(p => p.kind === 'visitor' && p.name === SELF_USERNAME.toLowerCase()),
+    JSON.stringify(visitorPlan.presence));
+
+  let ownerFloor = null;
+  try {
+    const rawOwner = visitorHomeBefore && typeof visitorHomeBefore.roomLayout === 'string' && visitorHomeBefore.roomLayout.trim().startsWith('{')
+      ? JSON.parse(visitorHomeBefore.roomLayout)
+      : null;
+    ownerFloor = rawOwner && Array.isArray(rawOwner.floor) ? rawOwner.floor : null;
+  } catch { ownerFloor = null; }
+  ok('plan: a visitor is drawn the owner\'s furniture, as the owner\'s base stores it',
+    ownerFloor ? visitorPlan.items.length === ownerFloor.length : true,
+    ownerFloor ? `owner floor ${ownerFloor.length} vs drawn ${visitorPlan.items.length}` : 'the owner has no v2 floor yet');
+
+  const visitorFurniture = visitorPlan.items[0] || null;
+  if (visitorFurniture) {
+    await drag(c, { x: visitorFurniture.x, y: visitorFurniture.y }, { x: visitorFurniture.x + 60, y: visitorFurniture.y + 40 });
+    await sleep(1500);
+    const afterVisitorDrag = await c.eval(PLAN);
+    const draggedItem = afterVisitorDrag.items.find(i => i.id === visitorFurniture.id);
+    const visitorHomeAfterDrag = await c.eval(`fetch('/api/homes/u/${USERNAME}',{credentials:'include'}).then(r=>r.json()).then(b=>b.data.home)`);
+    ok('plan: a visitor dragging the furniture changes nothing on the owner\'s record',
+      JSON.stringify(visitorHomeBefore) === JSON.stringify(visitorHomeAfterDrag)
+      && !!draggedItem && draggedItem.left === visitorFurniture.left && draggedItem.top === visitorFurniture.top,
+      `record ${JSON.stringify(visitorHomeBefore) === JSON.stringify(visitorHomeAfterDrag) ? 'unchanged' : 'CHANGED'}; on screen ${draggedItem && draggedItem.left},${draggedItem && draggedItem.top}`);
+  }
+  await shot(c, '/tmp/shot_base_plan_visited.png');
+
+  // ── The property office: the ladder, priced, and recorded ─────────────────
+  // The ladder is only real if choosing a tier changes the base. This moves the
+  // probe's own base up one step through the UI, checks HomeBase.upgradeLevel and
+  // that the base redraws itself, then puts the tier back so the suite is idempotent
+  // (the same courtesy verify-shell.js pays when it deletes the message it sent).
+  await setViewport(c, 1440, 900);
+  await c.goto(`${BASE}/home`, 3500);
+  await sleep(2500);
+  const office = await c.eval(OFFICE);
+  console.log('   property office :', JSON.stringify((office.listings || []).map(l => `${l.level}:${l.action}`)));
+  ok('property office: all five tiers of the ladder are listed, each with a plan drawing',
+    office.present === true && (office.listings || []).length === 5
+    && office.listings.every(l => l.planRects >= 2 && /PLAN:/.test(l.planLabel.toUpperCase())),
+    office.present ? `${(office.listings || []).length} listings, plans ${JSON.stringify((office.listings || []).map(l => l.planLabel))}` : 'no property office');
+
+  const meHome = await c.eval(`fetch('/api/homes/u/${SELF_USERNAME}',{credentials:'include'}).then(r=>r.json()).then(b=>b.data.home)`);
+  const myTier = (meHome && meHome.upgradeLevel) || 1;
+  const here = (office.listings || []).find(l => l.level === myTier);
+  ok('property office: the tier you live in is the one your base stores, and it is not for sale',
+    !!here && here.action === 'YOU LIVE HERE' && here.disabled === true
+    && (office.listings || []).filter(l => l.action === 'YOU LIVE HERE').length === 1,
+    here ? `tier ${myTier}: ${here.action} (disabled ${here.disabled})` : `no listing for tier ${myTier}`);
+  // The listing's plan names the rooms the base itself draws, so a listing cannot sell
+  // rooms the plan view has not got.
+  ok('property office: the listing for your tier names every room your base draws',
+    !!here && plan0.roomLabels.length > 0
+    && plan0.roomLabels.every((name) => here.planLabel.toUpperCase().includes(name.toUpperCase())),
+    here ? `base rooms ${JSON.stringify(plan0.roomLabels)} vs listing "${here.planLabel}"` : 'no listing');
+
+  const nextListing = (office.listings || []).find(l => l.level === myTier + 1);
+  if (nextListing) {
+    ok('property office: the next tier up is the only one you may move into, and it is priced',
+      nextListing.disabled === false && /^MOVE IN — /.test(nextListing.action || ''),
+      `tier ${nextListing.level}: ${nextListing.action} (disabled ${nextListing.disabled})`);
+    const clicked = await c.eval(`(() => { const b = document.querySelector('#__next [data-listing="${myTier + 1}"] button'); if (!b) return { clicked: false }; b.click(); return { clicked: true }; })()`);
+    await sleep(2500);
+    const movedTier = await c.eval(`fetch('/api/homes/u/${SELF_USERNAME}',{credentials:'include'}).then(r=>r.json()).then(b=>b.data.home.upgradeLevel)`);
+    ok('property office: moving in is recorded on HomeBase.upgradeLevel',
+      clicked.clicked === true && movedTier === myTier + 1,
+      `clicked ${clicked.clicked}, upgradeLevel ${myTier} -> ${movedTier}`);
+
+    await c.goto(`${BASE}/${SELF_USERNAME}`, 3500);
+    await sleep(2500);
+    const planUp = await c.eval(PLAN);
+    ok('property office: the base redraws itself around the new tier',
+      planUp.tier === myTier + 1 && !!planUp.hud && planUp.hud.includes(`TIER ${myTier + 1}`),
+      `plan tier ${planUp.tier}, hud ${planUp.hud}`);
+    await shot(c, `/tmp/shot_base_plan_tier${myTier + 1}.png`);
+
+    const restored = await c.eval(`fetch('/api/home',{method:'PUT',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({upgradeLevel:${myTier}})}).then(r=>({status:r.status}))`);
+    ok('property office: the tier is put back, so the suite can run again',
+      restored.status === 200, `PUT ${restored.status}`);
+  } else {
+    ok('property office: the top of the ladder has no next tier to sell', true, `already at tier ${myTier}`);
+  }
 
   // ── A base that does not exist still 404s ─────────────────────────────────
   await c.goto(`${BASE}/nobodygoesbythisname`, 3500);
