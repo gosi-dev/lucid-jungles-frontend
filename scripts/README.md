@@ -79,6 +79,13 @@ The claim worth protecting is the strongest one in the file: the digits in the d
 compared against a fresh `GET /api/homes/u/:username`, so a future edit that reintroduces a
 computed-on-the-client number fails the suite instead of shipping.
 
+The second half of the file is about the base being *arrangeable* rather than merely drawn:
+a real mouse drag of a desk item is followed all the way into `HomeBase` (`roomLayout` keeps
+the placement as JSON, `furniture` keeps the equipped ids), a reload stands the item where it
+was left rather than where the default desk puts it, and a visitor dragging the same desk
+changes nothing on the owner's record. Before this, the desk was component state: the
+arrangement existed until the tab was closed.
+
 ## Notes
 
 - Both scripts sign in as the seeded admin (`seed@lucidcityjungles.com`), because the entity

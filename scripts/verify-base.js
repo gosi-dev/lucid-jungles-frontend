@@ -47,6 +47,33 @@ async function setViewport(client, width, height) {
   await client.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: width < 600 });
 }
 
+// A real mouse drag: the desk is moved by mouse events on the item plus
+// mousemove/mouseup on the window, so making one is the only way to prove that the
+// arrangement an owner makes is the arrangement that gets saved.
+async function drag(client, from, to) {
+  const at = (x, y, type) => ({ type, x: Math.round(x), y: Math.round(y), button: 'left', buttons: 1, clickCount: 1 });
+  await client.send('Input.dispatchMouseEvent', at(from.x, from.y, 'mousePressed'));
+  await sleep(80);
+  await client.send('Input.dispatchMouseEvent', at(from.x + 24, from.y + 18, 'mouseMoved'));
+  await sleep(80);
+  await client.send('Input.dispatchMouseEvent', at(to.x, to.y, 'mouseMoved'));
+  await sleep(80);
+  await client.send('Input.dispatchMouseEvent', at(to.x, to.y, 'mouseReleased'));
+}
+
+// Where a desk item actually stands: the rendered box (to aim at) and the x/y the
+// component placed it at (what gets saved).
+const deskItem = (label) => `(() => {
+  const el = document.querySelector('#__next [aria-label="Open ${label}"]');
+  if (!el) return null;
+  const r = el.getBoundingClientRect();
+  return {
+    x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2),
+    left: Math.round(parseFloat(el.style.left) || 0), top: Math.round(parseFloat(el.style.top) || 0),
+    w: Math.round(r.width), h: Math.round(r.height),
+  };
+})()`;
+
 // Read the base's own pieces: the drawer strip is the button wrapping the first
 // avatar, the card appears under it once opened, and the stat row is located from
 // its FOLLOWERS label (the one label that appears nowhere else on the page).
@@ -237,6 +264,61 @@ const CLICK_CTA = `(() => {
     ok('own base: CUSTOMISE THIS BASE opens the base customiser', clicked.clicked === true && path === '/home', path || 'never navigated');
     await shot(c, '/tmp/shot_base_customiser.png');
   }
+
+  // ── The arrangement is saved, and it comes back ───────────────────────────
+  // /[username] is a *customisable* home only if what the owner arranges is what
+  // HomeBase stores — otherwise the desk is a toy that resets on every visit.
+  await setViewport(c, 1440, 900);
+  await c.goto(`${BASE}/${SELF_USERNAME}`, 3500);
+  await sleep(1800);
+  const before = await c.eval(deskItem('JOURNAL'));
+  ok('desk: the owner has a desk to arrange', !!before, before ? JSON.stringify(before) : 'no JOURNAL on the desk');
+  let moved = null;
+  if (before) {
+    await drag(c, { x: before.x, y: before.y }, { x: before.x + 90, y: before.y + 60 });
+    await sleep(1500);
+    moved = await c.eval(deskItem('JOURNAL'));
+    const homeAfter = await c.eval(`fetch('/api/homes/u/${SELF_USERNAME}',{credentials:'include'}).then(r=>r.json()).then(b=>b.data.home)`);
+    let savedJournal = null;
+    try {
+      const parsed = homeAfter && typeof homeAfter.roomLayout === 'string' ? JSON.parse(homeAfter.roomLayout) : null;
+      savedJournal = parsed && Array.isArray(parsed.items) ? parsed.items.find((i) => i.id === 'JOURNAL') : null;
+    } catch {
+      savedJournal = null; // an unparseable layout fails the checks below
+    }
+    ok('desk: the drag moved the item on screen',
+      !!moved && (moved.left !== before.left || moved.top !== before.top),
+      `${before.left},${before.top} -> ${moved && moved.left},${moved && moved.top}`);
+    ok('desk: the arrangement is written to HomeBase (roomLayout)',
+      !!savedJournal && savedJournal.x === moved.left && savedJournal.y === moved.top,
+      `saved ${JSON.stringify(savedJournal)} vs on screen ${moved && moved.left},${moved && moved.top}`);
+    ok('desk: the equipped items are stored as furniture',
+      !!homeAfter && Array.isArray(homeAfter.furniture) && homeAfter.furniture.includes('JOURNAL'),
+      homeAfter ? `furniture ${JSON.stringify(homeAfter.furniture)}` : 'no HomeBase document');
+    await shot(c, '/tmp/shot_base_desk_arranged.png');
+
+    // The proof: come back and stand where the item was left, not where the
+    // component's default layout puts it.
+    await c.goto(`${BASE}/${SELF_USERNAME}`, 3500);
+    await sleep(2200);
+    const reloaded = await c.eval(deskItem('JOURNAL'));
+    ok('desk: a reload restores the arrangement that was saved',
+      !!reloaded && reloaded.left === moved.left && reloaded.top === moved.top,
+      reloaded ? `${reloaded.left},${reloaded.top} vs saved ${moved.left},${moved.top}` : 'no JOURNAL after the reload');
+    await shot(c, '/tmp/shot_base_desk_reloaded.png');
+  }
+
+  // A visitor may stand in the base, but the arrangement is not theirs to change.
+  const visitorHomeBefore = await c.eval(`fetch('/api/homes/u/${USERNAME}',{credentials:'include'}).then(r=>r.json()).then(b=>b.data.home)`);
+  await c.goto(`${BASE}/${USERNAME}`, 3000);
+  await sleep(1800);
+  const visitorItem = await c.eval(deskItem('JOURNAL'));
+  if (visitorItem) await drag(c, { x: visitorItem.x, y: visitorItem.y }, { x: visitorItem.x + 80, y: visitorItem.y + 50 });
+  await sleep(1500);
+  const visitorHomeAfter = await c.eval(`fetch('/api/homes/u/${USERNAME}',{credentials:'include'}).then(r=>r.json()).then(b=>b.data.home)`);
+  ok('desk: a visitor dragging the desk changes nothing on the owner\'s record',
+    JSON.stringify(visitorHomeBefore) === JSON.stringify(visitorHomeAfter),
+    `${JSON.stringify(visitorHomeBefore)} -> ${JSON.stringify(visitorHomeAfter)}`);
 
   // ── A base that does not exist still 404s ─────────────────────────────────
   await c.goto(`${BASE}/nobodygoesbythisname`, 3500);

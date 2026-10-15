@@ -3,7 +3,7 @@
 // HOME (desk + jungle), KURA (AI companion), DREAMS (journal), DOJO (fitness)
 // The jungle trees around the user icon match the dreaming.js procedural map.
 
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import { useHideBottomNav } from '../hooks/useHideBottomNav';
@@ -783,6 +783,61 @@ const DESK_CUSTOMIZER_ITEMS = [
   { id: 'MAILBOX', label: 'MAILBOX', price: '180 DT' },
 ];
 
+// ─── The base's saved arrangement ─────────────────────────────────────────────
+// The desk is the part of a base that belongs to its owner, so it is the part that
+// has to survive a reload and follow them onto a visitor's screen. HomeBase already
+// had the two fields this needs (API: PUT /api/home):
+//
+//   furniture  — the equipped item ids, as a plain readable list
+//   roomLayout — the arrangement itself, as JSON, because a dragged desk is a
+//                position and not just a set of items.
+//
+// Nothing here is invented on the client: what is rendered is what was saved.
+const LAYOUT_VERSION = 1;
+
+const placementFor = (id) => {
+  const preset = DEFAULT_DESK_LAYOUT.find((item) => item.id === id);
+  if (preset) return { x: preset.x, y: preset.y, zIndex: preset.zIndex };
+  const style = DREAM_DESK_ITEMS[id]?.style || {};
+  return { x: style.left ?? 150, y: style.top ?? 110, zIndex: style.zIndex };
+};
+
+// null means "nothing saved yet", which is different from "saved as empty": an
+// untouched base stands with its default desk, and only a deliberate change
+// replaces that.
+const parseSavedLayout = (home) => {
+  if (!home) return null;
+
+  const raw = home.roomLayout;
+  if (typeof raw === 'string' && raw.trim().startsWith('{')) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.version === LAYOUT_VERSION && Array.isArray(parsed.items)) {
+        const items = parsed.items
+          .filter((item) => item && DREAM_DESK_ITEMS[item.id])
+          .map((item) => ({ id: item.id, x: Number(item.x) || 0, y: Number(item.y) || 0, zIndex: item.zIndex }));
+        if (items.length) return items;
+      }
+    } catch {
+      // An unreadable arrangement is treated as none rather than as a crash.
+    }
+  }
+
+  // A base written before the layout was serialised carries only the id list.
+  if (Array.isArray(home.furniture) && home.furniture.length) {
+    return home.furniture
+      .filter((id) => DREAM_DESK_ITEMS[id])
+      .map((id) => ({ id, ...placementFor(id) }));
+  }
+
+  return null;
+};
+
+const serializeLayout = (items) => JSON.stringify({
+  version: LAYOUT_VERSION,
+  items: items.map(({ id, x, y, zIndex }) => ({ id, x: Math.round(x), y: Math.round(y), zIndex })),
+});
+
 // ─── Map Background — 3x3 around user, exact dreaming generation ─────────────
 // Hardcoded behavior: render the same procedural world rules as dreaming.js,
 // then show only the 3x3 neighborhood around the user so the desk reads as
@@ -1084,11 +1139,14 @@ function DreamDeskPopup({ menuItems, activeDeskItem, onSelectItem, onClose, styl
 }
 
 // ─── Home Scene (frozen canvas with jungle + desk) ────────────────────────────
-function HomeScene({ activeDeskItem, setActiveDeskItem, username, onOpenKura }) {
+function HomeScene({ activeDeskItem, setActiveDeskItem, username, onOpenKura, home, isSelf }) {
   const [deskPopupOpen, setDeskPopupOpen] = useState(false);
   const [deskCustomizerOpen, setDeskCustomizerOpen] = useState(false);
   const [deskDrawerView, setDeskDrawerView] = useState(null);
-  const [deskItems, setDeskItems] = useState(DEFAULT_DESK_LAYOUT);
+  // Start from what the owner saved, not from the default desk, so the first paint
+  // of a base somebody has arranged is already their arrangement.
+  const savedLayout = useMemo(() => parseSavedLayout(home), [home]);
+  const [deskItems, setDeskItems] = useState(() => savedLayout || DEFAULT_DESK_LAYOUT);
   const [ownedDeskItems, setOwnedDeskItems] = useState(['JOURNAL', 'RADIO', 'PORTFOLIO', 'SLUM BOOK']);
   const [deskCustomizerIndex, setDeskCustomizerIndex] = useState(0);
   const [draggedDeskItemId, setDraggedDeskItemId] = useState(null);
@@ -1114,6 +1172,36 @@ function HomeScene({ activeDeskItem, setActiveDeskItem, username, onOpenKura }) 
   const isOwnedCustomizerItem = ownedDeskItems.includes(currentCustomizerItem.id);
   const isEquippedCustomizerItem = deskItems.some((item) => item.id === currentCustomizerItem.id);
 
+  // The saved arrangement arrives with the base (which is fetched), so it is adopted
+  // when it lands, not only in the initial state.
+  useEffect(() => {
+    if (savedLayout) setDeskItems(savedLayout);
+  }, [savedLayout]);
+
+  // The handlers below run outside the render that owns `deskItems` — a drag's
+  // listeners are attached on mousedown — so the current arrangement is kept in a
+  // ref to be saved from there.
+  const deskItemsRef = useRef(deskItems);
+  useEffect(() => { deskItemsRef.current = deskItems; }, [deskItems]);
+
+  // Only the owner writes, and only after a deliberate change. Saving on mount would
+  // let a visitor's default desk overwrite somebody's arranged one; the API refuses
+  // it too, since PUT /api/home is login-required and scoped to the session's user.
+  const saveLayout = useCallback((items) => {
+    if (!isSelf || !items || !items.length) return;
+    fetch('/api/home', {
+      method: 'PUT',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        furniture: items.map((item) => item.id),
+        roomLayout: serializeLayout(items),
+      }),
+    }).catch(() => {
+      // A base that failed to save is still on screen, and the next change retries.
+    });
+  }, [isSelf]);
+
   useEffect(() => {
     const el = containerRef.current;
     if (el && !frozen) setFrozen({ w: el.offsetWidth, h: el.offsetHeight });
@@ -1130,16 +1218,19 @@ function HomeScene({ activeDeskItem, setActiveDeskItem, username, onOpenKura }) 
     const config = DREAM_DESK_ITEMS[itemId];
     if (!config) return;
 
-    setDeskItems((items) => [
-      ...items,
+    const next = [
+      ...deskItems,
       {
         id: itemId,
         x: config.style.left ?? 150,
         y: config.style.top ?? 110,
         zIndex: config.style.zIndex,
       },
-    ]);
+    ];
+    setDeskItems(next);
     setActiveDeskItem(itemId);
+    // Equipping is the owner deciding what is in their home, so it is saved.
+    saveLayout(next);
   };
 
   const handlePurchaseDeskItem = (itemId) => {
@@ -1203,7 +1294,13 @@ function HomeScene({ activeDeskItem, setActiveDeskItem, username, onOpenKura }) 
     };
 
     const handleEnd = () => {
-      if (dragMovedRef.current) suppressClickUntilRef.current = Date.now() + 200;
+      if (dragMovedRef.current) {
+        suppressClickUntilRef.current = Date.now() + 200;
+        // A drag that actually moved the item is a change to the arrangement, so it
+        // is saved — from the ref, because this listener closed over the layout as
+        // it was when the drag started.
+        saveLayout(deskItemsRef.current);
+      }
       setTimeout(() => {
         setDraggedDeskItemId(null);
         setIsDraggingDeskItem(false);
@@ -2661,7 +2758,7 @@ function UserBase({ username: ssrUsername, base }) {
 
       {/* Content */}
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
-        {activeTab === 'home'   && <HomeScene activeDeskItem={activeDeskItem} setActiveDeskItem={setActiveDeskItem} username={username} onOpenKura={() => setActiveTab('kura')} />}
+        {activeTab === 'home'   && <HomeScene activeDeskItem={activeDeskItem} setActiveDeskItem={setActiveDeskItem} username={username} onOpenKura={() => setActiveTab('kura')} home={base && base.home} isSelf={isSelf} />}
         {activeTab === 'kura'   && <KuraTab />}
         {activeTab === 'dreams' && <DreamsTab ownerId={owner ? owner._id : null} />}
         {activeTab === 'dojo'   && <DojoTab />}
