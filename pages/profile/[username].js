@@ -3,6 +3,7 @@ import { useSelector } from 'react-redux';
 import { useRouter } from 'next/router';
 import NavBar from '../../components/NavBar';
 import { useIsDesktop } from '../../hooks/useIsDesktop';
+import MockAvatar from '../../components/MockAvatar';
 
 const LEVEL_COLORS = {
   Novice: 'rgba(171,212,158,0.4)',
@@ -95,10 +96,14 @@ export default function ProfilePage() {
   const identity = (
     <div style={{ display: 'flex', alignItems: isDesktop ? 'center' : 'flex-end', gap: isDesktop ? 24 : 20, marginBottom: isDesktop ? 0 : 20 }}>
       <div style={S.avatar}>
-        {avatarSrc
-          ? <img src={avatarSrc} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-          : '◈'
-        }
+        <MockAvatar
+          username={user.username}
+          src={avatarSrc}
+          size="100%"
+          radius="50%"
+          fontSize={isDesktop ? 40 : 28}
+          style={{ border: 'none' }}
+        />
       </div>
       <div>
         <h1 style={S.name}>{user.username}</h1>

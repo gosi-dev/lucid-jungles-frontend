@@ -23,12 +23,13 @@ rather than an impression. Screenshots are written alongside the numbers.
     npm run verify:entities     # entity lists + profiles: layout, actions, destinations
     npm run verify:shell        # the shell ten routes share, /chat end to end, storage
     npm run verify:profile      # the profile a VIEW PROFILE action opens
+    npm run verify:base         # a base: the face, the visit counts, the knock
 
 On Node 20 the flag is required, so run the files directly:
 
     node --experimental-websocket scripts/verify-shell.js
 
-Both print one `PASS`/`FAIL` line per check and exit non-zero if any check fails.
+Each prints one `PASS`/`FAIL` line per check and exits non-zero if any check fails.
 
 ## What they cover
 
@@ -62,10 +63,28 @@ the bar is their only way out — so they are checked at 1440 and 390 for it dir
 name scaling with the viewport, one column on a phone, MESSAGE present on somebody else's
 profile and opening the conversation with them, and the edit link (not MESSAGE) on your own.
 
+`verify-base.js` — a base treated as a *home* (`pages/[username].js`), at 390 and 1440. The
+base used to draw a hardcoded profile — `avatar: null`, `followers: '29.7K'`, `moments: 300`,
+`connections: 1279` — so every base in the jungle read identically and no arrival was ever
+recorded. Three things replaced it, and each is measured here: the face
+(`components/MockAvatar.jsx`, deterministic per username, with a real `profile_picture`
+winning when the owner has one), the counts (FOLLOWERS / VISITS / VISITORS from
+`GET /api/homes/u/:username`), and the knock (`POST /api/visit` on arrival, acknowledged in
+the drawer). It also mounts the design system's status bars (`components/VitalBars.jsx`,
+which was written for the drawer and had no caller until now), checks the owner sees
+CUSTOMISE THIS BASE rather than CONNECT and that it opens `/home`, and that a typo still
+reaches the not-found screen.
+
+The claim worth protecting is the strongest one in the file: the digits in the drawer are
+compared against a fresh `GET /api/homes/u/:username`, so a future edit that reintroduces a
+computed-on-the-client number fails the suite instead of shipping.
+
 ## Notes
 
 - Both scripts sign in as the seeded admin (`seed@lucidcityjungles.com`), because the entity
-  actions and `/chat` sit behind the session.
+  actions and `/chat` sit behind the session. `verify-base.js` needs an account that is *not*
+  the base's owner — a visitor is the only one who has a visit to record and a CONNECT button
+  to see.
 - `verify-shell.js` sends a real message and deletes it again, matched on the exact text of
   that run. It reaches the database through the backend's `.env`; set `BACKEND_DIR` if the
   backend is not beside this repo.

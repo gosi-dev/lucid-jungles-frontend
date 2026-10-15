@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useSelector } from 'react-redux';
 import { useLayout } from '../../context/LayoutContext';
 import { useHideBottomNav } from '../../hooks/useHideBottomNav';
+import MockAvatar from '../../components/MockAvatar';
 
 export default function YouDashboard() {
   const router = useRouter();
@@ -67,10 +68,17 @@ export default function YouDashboard() {
                 ))}
               </div>
 
-              {/* Name + level */}
+              {/* Name + level — the face here is the same mock avatar a visitor
+                  sees on your base, so the dashboard and the base agree about
+                  whose home this is. */}
               <div style={{ marginBottom: 16 }}>
-                <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>{username?.toUpperCase() || 'USER'}</h2>
-                <div style={{ fontSize: 11, opacity: 0.6, letterSpacing: 1, marginBottom: 10 }}>{level}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+                  <MockAvatar username={username} src={profile?.profile_picture} size={48} />
+                  <div>
+                    <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>{username?.toUpperCase() || 'USER'}</h2>
+                    <div style={{ fontSize: 11, opacity: 0.6, letterSpacing: 1 }}>{level}</div>
+                  </div>
+                </div>
 
                 {/* XP bar */}
                 <div style={{ backgroundColor: 'rgba(171,212,158,0.1)', height: 6, width: '100%', marginBottom: 4 }}>

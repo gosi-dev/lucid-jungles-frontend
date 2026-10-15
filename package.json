@@ -9,7 +9,8 @@
     "lint": "eslint",
     "verify:entities": "node scripts/verify-entities.js",
     "verify:shell": "node scripts/verify-shell.js",
-    "verify:profile": "node scripts/verify-profile.js"
+    "verify:profile": "node scripts/verify-profile.js",
+    "verify:base": "node scripts/verify-base.js"
   },
   "dependencies": {
     "@radix-ui/react-dropdown-menu": "^2.1.6",

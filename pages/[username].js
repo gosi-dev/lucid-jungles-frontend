@@ -13,6 +13,8 @@ import { useHideBottomNav } from '../hooks/useHideBottomNav';
 import NotFoundScreen from '../components/NotFoundScreen';
 import { useUsernameLookup, USER_LOOKUP } from '../hooks/useUsernameLookup';
 import { useBaseLookup, BASE_LOOKUP } from '../hooks/useBaseLookup';
+import MockAvatar from '../components/MockAvatar';
+import VitalBars, { deriveVitals } from '../components/VitalBars';
 import {
   FaCaretRight, FaChevronUp, FaChevronDown, FaUserFriends,
   Sparkles, Send, Heart, MessageCircle, Zap, ArrowLeft,
@@ -22,6 +24,13 @@ import {
 
 // ─── Grid constants (matching dreaming.js) ───
 const GRID_SIZE = 77;
+
+// A follower count belongs in the drawer strip as 29.7K, not 29700.
+const formatCount = (value) => {
+  const n = Number(value) || 0;
+  if (n < 1000) return String(n);
+  return `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}K`;
+};
 
 // ─── Seeded random (deterministic, matching dreaming.js) ───
 const seededRandom = (seed) => {
@@ -2283,7 +2292,11 @@ function ChatPanel({ profile, onClose }) {
 }
 
 // ─── Profile Drawer ───────────────────────────────────────────────────────────
-function ProfileDrawer({ open, onToggle, onClose, profile, connectionState, onConnect, chatOpen, onChatToggle }) {
+function ProfileDrawer({ open, onToggle, onClose, profile, vitals = [], connectionState, onConnect, chatOpen, onChatToggle }) {
+  // useRouter has to run before the chatOpen early return: a conditional hook
+  // would break the drawer the moment the chat panel is toggled.
+  const router = useRouter();
+
   if (chatOpen) {
     return (
       <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, height: 380, background: '#151413', zIndex: 200 }}>
@@ -2294,6 +2307,18 @@ function ProfileDrawer({ open, onToggle, onClose, profile, connectionState, onCo
 
   const isPending   = connectionState === 'pending';
   const isConnected = connectionState === 'connected';
+
+  // Your own base is not a person to connect to: the one action that makes sense
+  // here is opening the customiser, which is where décor and furniture live
+  // (pages/home/index.js → PUT /api/home).
+  const isSelf = Boolean(profile.isSelf);
+  const inert = !isSelf && (isPending || isConnected);
+  const primaryLabel = isSelf
+    ? 'CUSTOMISE THIS BASE'
+    : isPending ? 'REQUEST SENT' : isConnected ? 'CONNECTED' : 'CONNECT';
+  const onPrimaryAction = isSelf
+    ? () => router.push('/home')
+    : inert ? undefined : onConnect;
 
   return (
     <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: '#151413', zIndex: 200 }}>
@@ -2306,7 +2331,7 @@ function ProfileDrawer({ open, onToggle, onClose, profile, connectionState, onCo
           <IconChevron up={open}/>
         </div>
         <div style={{ width: 50, height: 50, background: '#101010', flexShrink: 0, overflow: 'hidden', marginTop: 10 }}>
-          {profile.avatar && <img src={profile.avatar} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }}/>}
+          <MockAvatar username={profile.username} src={profile.avatar} size="100%" style={{ border: 'none' }}/>
         </div>
         <span style={{ flex: 1, fontFamily: 'monospace', fontSize: 12, color: '#101010', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', marginTop: 10, textAlign: 'left' }}>
           {profile.displayName}
@@ -2325,18 +2350,29 @@ function ProfileDrawer({ open, onToggle, onClose, profile, connectionState, onCo
           </div>
 
           <div style={{ display: 'flex', gap: 14, padding: '0 16px 14px' }}>
-            <div style={{ width: 97, height: 97, background: '#ABD49E', flexShrink: 0, overflow: 'hidden' }}>
-              {profile.avatar && <img src={profile.avatar} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }}/>}
+            <div style={{ width: 97, height: 97, background: '#101010', flexShrink: 0, overflow: 'hidden' }}>
+              <MockAvatar username={profile.username} src={profile.avatar} size="100%" fontSize={40} style={{ border: 'none' }}/>
             </div>
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 10 }}>
-              <p style={{ fontFamily: 'monospace', fontSize: 13, color: '#ABD49E', fontWeight: 700, letterSpacing: '0.05em' }}>
-                {profile.displayName}
-              </p>
+              {/* The rank sits with the name: it is identity, and the XP bar it used
+                  to be welded to is now a status bar below. */}
+              <div>
+                <p style={{ fontFamily: 'monospace', fontSize: 13, color: '#ABD49E', fontWeight: 700, letterSpacing: '0.05em' }}>
+                  {profile.displayName}
+                </p>
+                <p style={{ fontFamily: 'monospace', fontSize: 9, color: 'rgba(171,212,158,0.7)', letterSpacing: '0.1em', marginTop: 3 }}>
+                  {profile.xpRank}
+                </p>
+              </div>
               <div style={{ display: 'flex' }}>
+                {/* The owner's real record: FOLLOWERS off the user document, and the
+                    two counts derived from the visit log. The 300 / 1279 / 29.7K that
+                    used to sit here was hardcoded, so every base in the jungle read
+                    exactly the same. */}
                 {[
-                  { value: profile.moments,    label: 'MOMENTS' },
-                  { value: profile.connections, label: 'CONNECTIONS' },
-                  { value: profile.followers,   label: 'FOLLOWERS' },
+                  { value: profile.followers, label: 'FOLLOWERS' },
+                  { value: profile.visits,    label: 'VISITS' },
+                  { value: profile.visitors,  label: 'VISITORS' },
                 ].map(({ value, label }, i) => (
                   <div key={label} style={{ flex: 1, textAlign: 'center', borderLeft: i > 0 ? '1px solid rgba(171,212,158,0.3)' : 'none' }}>
                     <p style={{ fontFamily: 'monospace', fontSize: 14, color: '#ABD49E', fontWeight: 700 }}>{value}</p>
@@ -2347,35 +2383,48 @@ function ProfileDrawer({ open, onToggle, onClose, profile, connectionState, onCo
             </div>
           </div>
 
-          <div style={{ margin: '0 16px 12px', display: 'flex', border: '1px solid rgba(171,212,158,0.25)' }}>
-            <div style={{ flex: profile.xpCurrent, height: 28, display: 'flex', alignItems: 'center', paddingInline: 8, background: '#ABD49E', overflow: 'hidden' }}>
-              <span style={{ fontFamily: 'monospace', fontSize: 9, color: '#101010', fontWeight: 700, whiteSpace: 'nowrap', letterSpacing: '0.06em' }}>
-                {profile.xpRank}
-              </span>
-            </div>
-            <div style={{ flex: profile.xpMax - profile.xpCurrent, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingInline: 8, background: '#151413' }}>
-              <span style={{ fontFamily: 'monospace', fontSize: 9, color: '#ABD49E', letterSpacing: '0.06em' }}>
-                {profile.xpCurrent}/{profile.xpMax} XP
-              </span>
-            </div>
-          </div>
+          {/* Compact status bars — the design system asked for them and
+              components/VitalBars.jsx is the component that draws them. Every bar
+              comes from deriveVitals, so nothing is invented: no mood or energy
+              number, because a visitor's view of those is not public.
+
+              The visits bar is left out on purpose — VISITS is already a number in
+              the row above, and a bar repeating it would just be the same figure
+              twice. What is left is XP and streak: the two things the card does not
+              otherwise print. */}
+          {vitals.length ? (
+            <VitalBars vitals={vitals} style={{ margin: '0 16px 12px' }}/>
+          ) : null}
 
           <div style={{ margin: '0 16px 14px' }}>
             <p style={{ fontFamily: 'Averia Sans Libre, sans-serif', fontSize: 13, color: '#E3E3E3', lineHeight: 1.55 }}>
               {profile.bio}
             </p>
+            {profile.location ? (
+              <p style={{ fontFamily: 'monospace', fontSize: 9, color: '#ABD49E', letterSpacing: '0.08em', marginTop: 6, opacity: 0.65 }}>
+                {profile.location.toUpperCase()}
+              </p>
+            ) : null}
           </div>
 
           <div style={{ padding: '0 16px 16px' }}>
-            <button onClick={!isPending && !isConnected ? onConnect : undefined} style={{
+            {/* Standing in a base is a social act, and POST /api/visit records it
+                (one per visitor per day). Saying it back is the knock: it only
+                ever appears for someone who is not the owner. */}
+            {profile.visitNote ? (
+              <p style={{ fontFamily: 'monospace', fontSize: 9, color: '#ABD49E', letterSpacing: '0.08em', marginBottom: 8, opacity: 0.75 }}>
+                {profile.visitNote}
+              </p>
+            ) : null}
+            <button onClick={onPrimaryAction} style={{
               width: '100%', height: 30,
-              background: isPending || isConnected ? 'transparent' : '#ABD49E',
-              border: isPending || isConnected ? '1px solid rgba(171,212,158,0.5)' : 'none',
-              color: isPending || isConnected ? '#ABD49E' : '#101010',
+              background: inert ? 'transparent' : '#ABD49E',
+              border: inert ? '1px solid rgba(171,212,158,0.5)' : 'none',
+              color: inert ? '#ABD49E' : '#101010',
               fontFamily: 'monospace', fontSize: 11, letterSpacing: '0.1em',
-              cursor: isPending ? 'default' : 'pointer',
+              cursor: inert ? 'default' : 'pointer',
             }}>
-              {isPending ? 'REQUEST SENT' : isConnected ? 'CONNECTED' : 'CONNECT'}
+              {primaryLabel}
             </button>
           </div>
         </div>
@@ -2500,7 +2549,7 @@ export async function getServerSideProps({ params }) {
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
-function UserBase({ username: ssrUsername, ownerId }) {
+function UserBase({ username: ssrUsername, base }) {
   const router = useRouter();
   const { username } = router.query;
   useHideBottomNav(true);
@@ -2510,20 +2559,70 @@ function UserBase({ username: ssrUsername, ownerId }) {
   const [chatOpen, setChatOpen]               = useState(false);
   const [activeDeskItem, setActiveDeskItem]   = useState(null);
   const [connectionState, setConnectionState] = useState('stranger');
+  const [visitResult, setVisitResult]         = useState(null);
+
+  // Everything the drawer shows is the owner's own record, read through
+  // GET /api/homes/u/:username — the same allow-listed public fields anyone else
+  // sees. It replaces a hardcoded profile object (avatar: null, followers:
+  // '29.7K', moments: 300) that made every base in the jungle look identical.
+  const owner  = base && base.owner ? base.owner : null;
+  const visits = (visitResult && visitResult.visits) || (base && base.visits) || { total: 0, unique: 0 };
+  const isSelf = Boolean(base && base.isSelf);
+  const handle = (owner && owner.username) || username || '';
+
+  const visitedToday = Boolean(
+    (visitResult && visitResult.firstVisitToday)
+    || (base && base.visits && base.visits.visitedByYouToday)
+  );
 
   const profile = {
-    username:    username || '',
-    displayName: (username || 'USER').toUpperCase(),
-    avatar:      null,
-    bio:         'Exploring creativity, technology, and human connection through immersive experiences across events, art, and play.',
-    moments:     300,
-    connections: 1279,
-    followers:   '29.7K',
-    xpRank:      'NOVICE EXPLORER',
-    xpCurrent:   44,
-    xpMax:       100,
-    isPublic:    true,
+    username:    handle,
+    displayName: handle ? handle.toUpperCase() : 'USER',
+    avatar:      (owner && owner.profile_picture) || null,
+    bio:         (owner && owner.about) || 'This base has not been written yet.',
+    location:    (owner && owner.location) || null,
+    followers:   formatCount(owner && owner.number_of_followers),
+    visits:      visits.total || 0,
+    visitors:    visits.unique || 0,
+    xpRank:      String((owner && owner.level) || 'Novice').toUpperCase(),
+    isSelf,
+    // What the visit endpoint said back, told apart from what the page found
+    // already recorded: "counted" is only claimed when this mount is what added
+    // the row (firstVisitToday), otherwise the honest line is that you were here.
+    visitNote: isSelf || !visitedToday
+      ? null
+      : (visitResult && visitResult.firstVisitToday)
+        ? 'YOU KNOCKED — THIS VISIT COUNTED'
+        : 'YOU WERE HERE TODAY',
   };
+
+  // Standing in someone's base is a social act, so the arrival is recorded
+  // (POST /api/visit). One row per visitor per host per day — the compound unique
+  // index on Visit makes a refresh a no-op — so it is safe to fire on mount.
+  // A logged-out viewer gets a 401 and nothing happens: the base still renders,
+  // it is just not counted. The owner is never their own visitor.
+  useEffect(() => {
+    if (!profile.username || isSelf) return undefined;
+    if (base && base.visits && base.visits.visitedByYouToday) return undefined;
+    let cancelled = false;
+    fetch('/api/visit', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: profile.username }),
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body) => { if (!cancelled && body && body.data) setVisitResult(body.data); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [profile.username, isSelf, base]);
+
+  // XP and streak only: the visits bar is dropped because the stat row above
+  // already prints the same number (see the note in the drawer markup).
+  const vitals = useMemo(
+    () => deriveVitals(owner, visits).filter((v) => v.key !== 'visits'),
+    [owner, visits]
+  );
 
   if (connectionState === 'connected') {
     return (
@@ -2564,7 +2663,7 @@ function UserBase({ username: ssrUsername, ownerId }) {
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
         {activeTab === 'home'   && <HomeScene activeDeskItem={activeDeskItem} setActiveDeskItem={setActiveDeskItem} username={username} onOpenKura={() => setActiveTab('kura')} />}
         {activeTab === 'kura'   && <KuraTab />}
-        {activeTab === 'dreams' && <DreamsTab ownerId={ownerId} />}
+        {activeTab === 'dreams' && <DreamsTab ownerId={owner ? owner._id : null} />}
         {activeTab === 'dojo'   && <DojoTab />}
 
         {/* QR / Smiley on home tab */}
@@ -2576,6 +2675,7 @@ function UserBase({ username: ssrUsername, ownerId }) {
         onToggle={() => { setDrawerOpen(d => !d); setChatOpen(false); }}
         onClose={() => setDrawerOpen(false)}
         profile={profile}
+        vitals={vitals}
         connectionState={connectionState}
         onConnect={() => setConnectionState('pending')}
         chatOpen={chatOpen}
@@ -2622,7 +2722,8 @@ export default function UserBaseRoute() {
     );
   }
 
-  const owner = base && base.owner ? base.owner : null;
-  return <UserBase username={username} ownerId={owner ? owner._id : null} />;
+  // The base object itself goes down to UserBase: it carries the owner, the visit
+  // counts and isSelf, so the page never has to reconstruct any of it.
+  return <UserBase username={username} base={base} />;
 }
 
