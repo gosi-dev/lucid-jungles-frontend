@@ -5,9 +5,8 @@
 // (a rebuilt client, a new browser), or a remembered login whose cookie has expired. So
 // the session is treated as the source of truth and the local flag is reconciled to it.
 //
-// GET /api/events/user/my-tickets is loginRequired: 200 means the session is live; anything
-// else (the backend answers unauthenticated requests with 500 "Login required") means it is
-// not. One probe per mount.
+// GET /api/events/user/my-tickets is loginRequired: 200 means the session is live and a 401
+// means it is not. One probe per mount.
 //
 // status: 'checking' until the server has answered. The starting value mirrors redux so a
 // signed-in reload does not flash a gate.
