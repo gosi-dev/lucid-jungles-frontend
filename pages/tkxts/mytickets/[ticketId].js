@@ -16,8 +16,8 @@ export default function TicketDetail() {
   useEffect(() => {
     if (!ticketId) return;
     fetch('/api/tickets/' + ticketId, { credentials: 'include' })
-      .then(r => r.json())
-      .then(data => { setTicket(data.data || data); setLoading(false); })
+      .then(r => (r.ok ? r.json() : null))
+      .then(data => { setTicket(data ? (data.data || data) : null); setLoading(false); })
       .catch(() => setLoading(false));
   }, [ticketId]);
 
@@ -37,14 +37,23 @@ export default function TicketDetail() {
         <div style={{ padding: 16 }}>
           <div style={{ border: '1px solid rgba(171,212,158,0.3)', padding: 24, textAlign: 'center', marginBottom: 16 }}>
             <div style={{ fontSize: 48, marginBottom: 12 }}>🎫</div>
-            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>{ticket.type || ticket.ticketType}</div>
+            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>{ticket.ticketName || ticket.type || 'Ticket'}</div>
             <div style={{ fontSize: 13, opacity: 0.7 }}>{ticket.eventId?.title || 'Event'}</div>
+            {(ticket.eventId?.location || ticket.eventId?.date) && (
+              <div style={{ fontSize: 12, opacity: 0.6, marginTop: 8 }}>
+                {ticket.eventId?.location}
+                {ticket.eventId?.location && ticket.eventId?.date ? ' · ' : ''}
+                {ticket.eventId?.date ? new Date(ticket.eventId.date).toLocaleDateString() : ''}
+              </div>
+            )}
           </div>
           <div style={{ border: '1px solid rgba(171,212,158,0.15)', padding: 16 }}>
             {[
               { label: 'TICKET ID', value: ticket._id },
               { label: 'QUANTITY', value: ticket.quantity || 1 },
-              { label: 'PRICE', value: ticket.totalPrice ? '\u20A6' + ticket.totalPrice.toLocaleString() : 'Free' },
+              { label: 'PRICE', value: ticket.totalPaid ? '\u20A6' + ticket.totalPaid.toLocaleString() : 'Free' },
+              { label: 'STATUS', value: (ticket.status || 'confirmed').toUpperCase() },
+              { label: 'REFERENCE', value: ticket.paymentRef || '—' },
               { label: 'DATE', value: ticket.createdAt ? new Date(ticket.createdAt).toLocaleDateString() : '' },
             ].map(row => (
               <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid rgba(171,212,158,0.1)', fontSize: 13 }}>

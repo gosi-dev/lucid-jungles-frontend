@@ -43,7 +43,13 @@ export function EventProvider({ children }) {
         credentials: 'include',
         body: JSON.stringify(eventDataWithTickets),
       });
-      if (!res.ok) throw new Error('Failed to create event');
+      if (!res.ok) {
+        // Surface what the API actually said — a 401 ("sign in first") or a validation
+        // error — instead of a generic string. The Setup Tickets wizard alerts this
+        // message verbatim, so it is the only place a failed publish gets explained.
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || body.message || `Failed to create event (${res.status})`);
+      }
       return await res.json();
     } catch (error) {
       console.error('Failed to create event:', error);

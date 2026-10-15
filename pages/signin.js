@@ -30,7 +30,10 @@ export default function Signin() {
       toast.success("Login Successful", {
         description: "Welcome home, Dreamer.",
       });
-      setTimeout(() => router.push("/kura"), 2000);
+      // A gate that remembers where it interrupted — e.g. a half-finished ticket order.
+      const next = typeof router.query.next === 'string' ? router.query.next : null;
+      const destination = next && next.startsWith('/') ? next : "/kura";
+      setTimeout(() => router.push(destination), 2000);
     } catch (err) {
       toast.error(err?.data?.message || "Login failed");
     }

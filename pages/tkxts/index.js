@@ -3,15 +3,38 @@ import { useState, useEffect } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
-import { useSelector } from 'react-redux';
 import { useLayout } from '../../context/LayoutContext';
 import { useHideBottomNav } from '../../hooks/useHideBottomNav';
+import { useSignedIn } from '../../hooks/useSignedIn';
 import TicketCard from '../../components/TicketCard';
+
+const shortDate = (value) => {
+  if (!value) return '';
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+};
+
+// A purchase record is not a ticket card: the card wants the event's own details, so the
+// two are joined here rather than bending TicketCard around an API shape.
+const toTicketCard = (purchase) => {
+  const event = purchase.eventId || {};
+  return {
+    ...purchase,
+    title: event.title || 'Event',
+    name: purchase.ticketName || 'Ticket',
+    location: event.location || '',
+    date: shortDate(event.date),
+    time: event.time || '',
+    purchaseDate: shortDate(purchase.createdAt),
+    ticketCount: purchase.quantity || 1,
+  };
+};
 
 export default function TkxtsHub() {
   const router = useRouter();
   const { setActiveNav } = useLayout();
-  const { isLoggedIn, username, _id: userId } = useSelector(state => state.registerSlice);
+  // The server decides whether this account is signed in; redux only knows this device.
+  const { status: sessionStatus } = useSignedIn();
   const [activeTab, setActiveTab] = useState('MY TICKETS');
   const [tickets, setTickets] = useState([]);
   const [events, setEvents] = useState([]);
@@ -21,16 +44,22 @@ export default function TkxtsHub() {
   useEffect(() => setActiveNav('YOU'), [setActiveNav]);
 
   useEffect(() => {
-    if (!isLoggedIn) { router.push('/signin'); return; }
+    if (sessionStatus === 'out') { router.push('/signin'); return; }
+    if (sessionStatus !== 'in') return;   // still asking the server — stay on "Loading…"
     setLoading(true);
-    const fetchTickets = fetch('/api/tickets/user/' + userId, { credentials: 'include' }).then(r => r.ok ? r.json() : []).catch(() => []);
-    const fetchEvents = fetch('/api/events/user/' + userId, { credentials: 'include' }).then(r => r.ok ? r.json() : []).catch(() => []);
+    // Both lists are session-scoped. The previous version asked for /api/tickets/user/<redux _id>,
+    // and that id is never populated by sign-in, so it requested /user/undefined and a fresh
+    // purchase never appeared in TKXTS.
+    const fetchTickets = fetch('/api/events/user/my-tickets', { credentials: 'include' })
+      .then(r => (r.ok ? r.json() : [])).catch(() => []);
+    const fetchEvents = fetch('/api/events/mine', { credentials: 'include' })
+      .then(r => (r.ok ? r.json() : [])).catch(() => []);
     Promise.all([fetchTickets, fetchEvents]).then(([t, e]) => {
-      setTickets(Array.isArray(t) ? t : t.data || []);
+      setTickets((Array.isArray(t) ? t : t.data || []).map(toTicketCard));
       setEvents(Array.isArray(e) ? e : e.data || []);
       setLoading(false);
     });
-  }, [isLoggedIn, userId]);
+  }, [sessionStatus]);
 
   return (
     <>

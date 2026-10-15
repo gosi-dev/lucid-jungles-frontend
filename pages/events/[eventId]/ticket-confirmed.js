@@ -5,7 +5,7 @@ import { useRouter } from 'next/router';
 export default function TicketConfirmed() {
     const router = useRouter();
     const { eventId, transaction_id, tx_ref } = router.query;
-    const [status, setStatus] = useState('loading');   // loading | confirmed | failed
+    const [status, setStatus] = useState('loading');   // loading | failed
 
     useEffect(() => {
         // If Flutterwave redirected here with query params, validate server-side
@@ -19,13 +19,23 @@ export default function TicketConfirmed() {
                 body: JSON.stringify({ transaction_id, tx_ref })
             })
                 .then(r => r.json())
-                .then(data => setStatus(data.confirmed ? 'confirmed' : 'failed'))
+                .then(data => {
+                    // One success screen for the whole flow: hand the verified reference to the
+                    // receipt, which rebuilds the order from the confirmed purchases.
+                    if (data.confirmed) {
+                        router.replace(`/events/${eventId}/payment-success?ref=${encodeURIComponent(tx_ref)}`);
+                    } else {
+                        setStatus('failed');
+                    }
+                })
                 .catch(() => setStatus('failed'));
         } else {
-            // Arrived here from inline flow (no redirect params needed) — already confirmed
-            setStatus('confirmed');
+            // Reached without provider params (a direct visit, or a bookmarked link). The
+            // receipt is the single success screen, so hand off to it rather than keeping a
+            // second, thinner one alive here.
+            router.replace(`/events/${eventId}/payment-success`);
         }
-    }, [router.isReady, transaction_id, tx_ref]);
+    }, [router.isReady, transaction_id, tx_ref, router, eventId]);
 
     return (
         <>
@@ -42,26 +52,6 @@ export default function TicketConfirmed() {
                 textAlign: 'center'
             }}>
                 {status === 'loading' && <p style={{ opacity: 0.6 }}>Confirming payment...</p>}
-
-                {status === 'confirmed' && (
-                    <>
-                        <div style={{ fontSize: 48, marginBottom: 20 }}>✓</div>
-                        <h1 style={{ fontSize: 24, fontWeight: 'bold', marginBottom: 12 }}>TICKET CONFIRMED</h1>
-                        <p style={{ opacity: 0.7, marginBottom: 40 }}>A receipt has been sent to your email.</p>
-                        <button
-                            onClick={() => router.push('/')}
-                            style={{ border: '1px solid #ABD49E', background: 'none', color: '#ABD49E', padding: '12px 32px', fontWeight: 'bold', cursor: 'pointer', marginBottom: 12, width: '100%', maxWidth: 320 }}
-                        >
-                            BACK TO HOME
-                        </button>
-                        <button
-                            onClick={() => router.push(`/events/${eventId}`)}
-                            style={{ border: '1px solid #ABD49E', background: 'none', color: '#ABD49E', padding: '12px 32px', fontWeight: 'bold', cursor: 'pointer', width: '100%', maxWidth: 320 }}
-                        >
-                            VIEW EVENT
-                        </button>
-                    </>
-                )}
 
                 {status === 'failed' && (
                     <>

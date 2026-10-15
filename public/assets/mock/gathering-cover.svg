@@ -1,0 +1,77 @@
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1200 600' width='1200' height='600' role='img' aria-label='Rooftop gathering above the cloud layer at night'>
+  <defs>
+    <linearGradient id='sky' x1='0' y1='0' x2='0' y2='1'>
+      <stop offset='0' stop-color='#080F0C'/>
+      <stop offset='.5' stop-color='#12211A'/>
+      <stop offset='1' stop-color='#1D3327'/>
+    </linearGradient>
+    <linearGradient id='mist' x1='0' y1='0' x2='0' y2='1'>
+      <stop offset='0' stop-color='#ABD49E' stop-opacity='.3'/>
+      <stop offset='1' stop-color='#ABD49E' stop-opacity='0'/>
+    </linearGradient>
+    <linearGradient id='deck' x1='0' y1='0' x2='0' y2='1'>
+      <stop offset='0' stop-color='#16241C'/>
+      <stop offset='1' stop-color='#0A120E'/>
+    </linearGradient>
+    <radialGradient id='glow' cx='.5' cy='.5' r='.5'>
+      <stop offset='0' stop-color='#EAF7E1' stop-opacity='.85'/>
+      <stop offset='.45' stop-color='#ABD49E' stop-opacity='.22'/>
+      <stop offset='1' stop-color='#ABD49E' stop-opacity='0'/>
+    </radialGradient>
+  </defs>
+  <rect width='1200' height='600' fill='url(#sky)'/>
+  <g fill='#EAF7E1'>
+    <circle cx='90' cy='70' r='1.6' opacity='.8'/>
+    <circle cx='150' cy='140' r='1.1' opacity='.5'/>
+    <circle cx='230' cy='52' r='2' opacity='.85'/>
+    <circle cx='320' cy='180' r='1.2' opacity='.45'/>
+    <circle cx='395' cy='94' r='1.5' opacity='.7'/>
+    <circle cx='470' cy='30' r='1.1' opacity='.5'/>
+    <circle cx='540' cy='150' r='1.7' opacity='.75'/>
+    <circle cx='610' cy='70' r='1.2' opacity='.5'/>
+    <circle cx='680' cy='190' r='1.4' opacity='.55'/>
+    <circle cx='745' cy='40' r='1.8' opacity='.8'/>
+    <circle cx='1010' cy='90' r='1.5' opacity='.7'/>
+    <circle cx='1080' cy='160' r='1.1' opacity='.45'/>
+    <circle cx='1130' cy='58' r='2' opacity='.8'/>
+    <circle cx='980' cy='215' r='1.2' opacity='.4'/>
+  </g>
+  <circle cx='880' cy='165' r='210' fill='url(#glow)'/>
+  <circle cx='880' cy='165' r='54' fill='#F2FBEA' opacity='.92'/>
+  <circle cx='862' cy='150' r='11' fill='#D7EBCB' opacity='.5'/>
+  <circle cx='898' cy='186' r='7' fill='#D7EBCB' opacity='.42'/>
+  <g fill='#0C1611' opacity='.55'>
+    <rect x='40' y='250' width='120' height='350'/>
+    <rect x='175' y='300' width='90' height='300'/>
+    <rect x='1010' y='270' width='110' height='330'/>
+    <rect x='1140' y='330' width='60' height='270'/>
+    <rect x='286' y='352' width='70' height='248'/>
+  </g>
+  <g fill='#ABD49E' opacity='.55'>
+    <rect x='64' y='286' width='6' height='9'/>
+    <rect x='86' y='320' width='6' height='9'/>
+    <rect x='108' y='300' width='6' height='9'/>
+    <rect x='130' y='352' width='6' height='9'/>
+    <rect x='1036' y='306' width='6' height='9'/>
+    <rect x='1058' y='342' width='6' height='9'/>
+    <rect x='1080' y='316' width='6' height='9'/>
+    <rect x='1152' y='368' width='6' height='9'/>
+  </g>
+  <rect y='392' width='1200' height='208' fill='url(#mist)'/>
+  <ellipse cx='300' cy='452' rx='420' ry='52' fill='#ABD49E' opacity='.1'/>
+  <ellipse cx='900' cy='474' rx='470' ry='46' fill='#ABD49E' opacity='.08'/>
+  <rect y='400' width='1200' height='200' fill='url(#deck)'/>
+  <rect y='400' width='1200' height='2' fill='#ABD49E' opacity='.85'/>
+  <g fill='#0A120E'>
+    <path d='M470 400 L470 348 a9 9 0 0 1 18 0 L488 400 Z'/>
+    <path d='M540 400 L540 352 a10 10 0 0 1 20 0 L560 400 Z'/>
+    <path d='M612 400 L612 344 a9 9 0 0 1 18 0 L630 400 Z'/>
+    <path d='M684 400 L684 356 a8 8 0 0 1 16 0 L700 400 Z'/>
+    <path d='M752 400 L752 350 a10 10 0 0 1 20 0 L772 400 Z'/>
+    <rect x='742' y='392' width='40' height='12' rx='3'/>
+  </g>
+  <circle cx='660' cy='336' r='34' fill='#ABD49E' opacity='.14'/>
+  <circle cx='660' cy='336' r='16' fill='#ABD49E' opacity='.3'/>
+  <text x='64' y='528' fill='#ABD49E' font-family='Inter, Helvetica, Arial, sans-serif' font-size='34' font-weight='700' letter-spacing='6'>LUCID JUNGLES</text>
+  <text x='66' y='558' fill='#ABD49E' opacity='.7' font-family='Inter, Helvetica, Arial, sans-serif' font-size='16' letter-spacing='8'>THE GATHERING</text>
+</svg>

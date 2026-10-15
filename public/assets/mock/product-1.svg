@@ -1,0 +1,6 @@
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200' width='200' height='200' role='img' aria-label='Product thumbnail'>
+  <rect width='200' height='200' fill='#12211A'/>
+  <path d='M60 130 c0-34 22-62 40-70 c18 8 40 36 40 70 Z' fill='#ABD49E' opacity='.85'/>
+  <path d='M100 130 V74' stroke='#12211A' stroke-width='4'/>
+  <rect x='56' y='130' width='88' height='10' fill='#ABD49E' opacity='.45'/>
+</svg>

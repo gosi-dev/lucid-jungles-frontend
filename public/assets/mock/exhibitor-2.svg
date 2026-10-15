@@ -1,0 +1,19 @@
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 800 600' width='800' height='600' role='img' aria-label='Exhibitor placeholder artwork'>
+  <defs>
+    <linearGradient id='bg' x1='0' y1='0' x2='1' y2='1'>
+      <stop offset='0' stop-color='#1A1410'/>
+      <stop offset='1' stop-color='#2A2118'/>
+    </linearGradient>
+  </defs>
+  <rect width='800' height='600' fill='url(#bg)'/>
+  <g opacity='.9'>
+    <rect x='170' y='150' width='300' height='380' fill='#E3B98A' opacity='.16' stroke='#E3B98A' stroke-opacity='.5' stroke-width='2' transform='rotate(-6 320 340)'/>
+    <rect x='250' y='130' width='300' height='380' fill='#E3B98A' opacity='.22' stroke='#E3B98A' stroke-opacity='.65' stroke-width='2' transform='rotate(4 400 320)'/>
+    <g stroke='#E3B98A' stroke-opacity='.55' stroke-width='3' stroke-linecap='round' transform='rotate(4 400 320)'>
+      <path d='M300 220 h200 M300 270 h200 M300 320 h140 M300 370 h170'/>
+    </g>
+  </g>
+  <circle cx='624' cy='228' r='66' fill='none' stroke='#E3B98A' stroke-opacity='.6' stroke-width='3'/>
+  <path d='M596 228 h56 M624 200 v56' stroke='#E3B98A' stroke-opacity='.6' stroke-width='3'/>
+  <text x='48' y='552' fill='#E3B98A' font-family='Inter, Helvetica, Arial, sans-serif' font-size='26' font-weight='700' letter-spacing='4'>JUNGLE PRESS</text>
+</svg>

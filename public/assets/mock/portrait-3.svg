@@ -1,0 +1,13 @@
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 600 600' width='600' height='600' role='img' aria-label='Portrait placeholder'>
+  <defs>
+    <radialGradient id='g' cx='.5' cy='.38' r='.62'>
+      <stop offset='0' stop-color='#8FC9C1' stop-opacity='.42'/>
+      <stop offset='1' stop-color='#8FC9C1' stop-opacity='0'/>
+    </radialGradient>
+  </defs>
+  <rect width='600' height='600' fill='#101A1B'/>
+  <circle cx='300' cy='228' r='300' fill='url(#g)'/>
+  <circle cx='300' cy='252' r='104' fill='#8FC9C1' opacity='.72'/>
+  <path d='M104 600 a196 196 0 0 1 392 0 Z' fill='#8FC9C1' opacity='.55'/>
+  <circle cx='300' cy='252' r='104' fill='none' stroke='#E6FBF8' stroke-opacity='.3' stroke-width='3'/>
+</svg>
