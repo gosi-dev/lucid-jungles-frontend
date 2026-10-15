@@ -22,6 +22,7 @@ rather than an impression. Screenshots are written alongside the numbers.
 
     npm run verify:entities     # entity lists + profiles: layout, actions, destinations
     npm run verify:shell        # the shell ten routes share, /chat end to end, storage
+    npm run verify:profile      # the profile a VIEW PROFILE action opens
 
 On Node 20 the flag is required, so run the files directly:
 
@@ -41,6 +42,11 @@ the 1180px desktop grid, the phone tab bar is gone above 1024px and back below i
 lays out as two panes and a sent message really renders, every shell route renders without
 throwing, and the persisted redux slice carries no plaintext password — including a legacy
 blob written the way the old slice would have written it.
+
+`verify-profile.js` — the page the entity dialog's other action opens
+(`pages/profile/[username].js`): the 1180px grid and the two-column split on a desktop, the
+name scaling with the viewport, one column on a phone, MESSAGE present on somebody else's
+profile and opening the conversation with them, and the edit link (not MESSAGE) on your own.
 
 ## Notes
 
