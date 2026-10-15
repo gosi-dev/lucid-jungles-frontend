@@ -38,26 +38,24 @@ VIEW PORTFOLIO / VIEW PROFILE / MESSAGE lead. Also that `?tab=` is honoured, tha
 desktop layout does not overflow, and that the phone layout keeps its scroller.
 
 `verify-shell.js` — the routes that share `components/MvpShell.jsx`: content stays inside
-the 1180px desktop grid, the phone tab bar is gone above 1024px and replaced by the desktop
-nav row in the header (the same five destinations, starting on the content grid at x=162,
-exactly one lit, and one of them clicked through to its route), the bar takes over again
-below the breakpoint at 1024/390, `/chat` lays out as two panes with the composer still
-inside the window now that the header is taller, every shell route renders without throwing,
-and the persisted redux slice carries no plaintext password — including a legacy blob written
-the way the old slice would have written it.
+the 1180px desktop grid, the phone tab bar is on screen at **every** width — 1440, 1024 and
+390 — carrying all five destinations with exactly one lit, one of them clicked through to its
+route, and nothing else drawn as a second navigation beside it, `/chat` lays out as two panes
+with the composer clear of the bar at the bottom of the window, every shell route renders
+without throwing, and the persisted redux slice carries no plaintext password — including a
+legacy blob written the way the old slice would have written it.
 
-Two things this suite learned the hard way, worth keeping: the "tab bar is gone" check counts
-only *fixed-bottom* navs (the desktop row is also a `<nav>`, so counting every nav would let
-the row satisfy the claim), and a shell-header height change belongs in `pages/chat.js`'s
-subtraction (`DESKTOP_NAV_H` from `components/DesktopNavRow.jsx`) or the composer ends up
-below the fold — the check that catches it is `docHeight <= 902` at 1440x900.
+Two things this suite learned the hard way, worth keeping: the "is the bar there" check must
+count *fixed-bottom* navs specifically, and everything else that renders as a `<nav>` has to
+be counted separately as a second navigation (during the desktop-row build, counting every nav
+let the row stand in for the bar and the claim passed on the wrong element); and the pane
+subtraction in `pages/chat.js` has to keep the 75px bar out of the way — the check that catches
+it is the composer's bottom edge against the bar's top (`composer.y + composer.h <= vh - 75`),
+which is how the 140px it inherited was found to leave the composer 17px underneath it.
 
-The breakpoint is pinned in both directions. The width sets the *default* (from 1024px up the
-bar is not rendered), but a page that asked for the bar with `useHideBottomNav(false)` keeps
-it at any width: `/you` and `/tkxts` ask, and they have no other navigation, so letting the
-breakpoint overrule the request left both routes with no way out. Those two are checked at
-1440 and 390 with `/home` next to them — nothing asked, so the default must still apply — so
-the exception cannot quietly turn into the rule.
+The width is pinned rather than the two ends of it: 1024 is where the bar used to be deleted,
+so that boundary is in the loop. `/you` and `/tkxts` have no shell and no MENU of their own —
+the bar is their only way out — so they are checked at 1440 and 390 for it directly.
 
 `verify-profile.js` — the page the entity dialog's other action opens
 (`pages/profile/[username].js`): the 1180px grid and the two-column split on a desktop, the

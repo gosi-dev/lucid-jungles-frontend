@@ -1,27 +1,22 @@
 // components/BottomNav.jsx
 import Link from "next/link";
 import { useLayout } from "../context/LayoutContext";
-import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useActiveNav } from "../hooks/useActiveNav";
 import { NAV_ITEMS } from "../utils/navItems";
 
-// The five destinations and the route→destination mapping both come from utils/navItems.js,
-// because components/DesktopNavRow.jsx renders the same list at desktop widths.
+// The five destinations come from utils/navItems.js.
 //
-// It is a phone tab bar: a fixed 75px strip of five equal tabs. Stretched across a desktop
-// window that is five 288px targets, which is not a desktop layout, so from 1024px up this
-// bar is not rendered and the shell header carries DesktopNavRow instead. Pages that still
-// want the bar at any width drive it with useHideBottomNav(false) — that request wins over
-// the breakpoint, because those pages have asked for the bar as their navigation.
+// This is the app's navigation at every width. f4e606a stopped rendering it from 1024px up
+// ("five 288px targets is not a desktop layout") while nothing took its place, so at desktop
+// the ten routes that mount MvpShell — and the / and /profile maps — rendered with no
+// navigation at all. It is rendered again at every width. Full-viewport surfaces that want it
+// out of the way still say so with useHideBottomNav(true).
 
 export default function BottomNav() {
-  const { showBottomNav, bottomNavPreference } = useLayout();
+  const { showBottomNav } = useLayout();
   const [activeNav, setActiveNav] = useActiveNav();
-  const isDesktop = useIsDesktop();
 
-  const askedFor = bottomNavPreference === 'show';
-
-  if (!showBottomNav || (isDesktop && !askedFor)) return null;
+  if (!showBottomNav) return null;
 
   return (
     <nav

@@ -8,7 +8,6 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/router';
 import { useSignedIn } from '../hooks/useSignedIn';
 import MvpShell, { mvpCard, mvpInput, mvpButton } from '../components/MvpShell';
-import { DESKTOP_NAV_H } from '../components/DesktopNavRow';
 import { useIsDesktop } from '../hooks/useIsDesktop';
 
 // Deterministic and order-independent, so both sides land in the same thread.
@@ -113,13 +112,15 @@ export default function ChatPage() {
 
   const isDesktop = useIsDesktop();
 
-  // The conversation fills what the window has left after the shell header and padding. On a
-  // desktop the header also carries DesktopNavRow, so its height is in the subtraction too —
-  // otherwise the composer is pushed 46px past the bottom of the screen.
+  // The conversation fills what the window has left after the shell header and padding, which
+  // is what 140 was tuned for on a phone: 54px header, 28px of content padding, the 75px tab
+  // bar, and the slack that keeps the composer's border off it. On a desktop the shell opens
+  // the same 28px above the pane again, so 140 leaves the composer ~17px underneath the bar —
+  // 160 puts it back above it. The bar is at the bottom at every width, so this is not a
+  // desktop-only concern.
   // Browsing (`/chat` with no ?to=) also carries the open-by-id card, so the panes give
   // that back rather than pushing the composer off the bottom.
-  const chrome = 140 + (isDesktop ? DESKTOP_NAV_H : 0);
-  const paneHeight = isDesktop ? `calc(100vh - ${toUserId ? chrome : chrome + 180}px)` : 'auto';
+  const paneHeight = isDesktop ? (toUserId ? 'calc(100vh - 160px)' : 'calc(100vh - 340px)') : 'auto';
   const paneFloor = isDesktop ? 320 : undefined;
 
   return (

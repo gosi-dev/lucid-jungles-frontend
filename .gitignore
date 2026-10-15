@@ -63,3 +63,4 @@ tmp/
 
 # Pre-port snapshots of files replaced by CONSOLIDATED ports
 .port-backups/
+nohup.out

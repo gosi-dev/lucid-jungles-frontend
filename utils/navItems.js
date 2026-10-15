@@ -1,9 +1,8 @@
 // utils/navItems.js
 //
-// The five destinations the app navigates by, in order, with the icons the phone tab bar
-// uses. One list, because it is rendered twice: components/BottomNav.jsx draws it as the
-// 75px phone tab bar, components/DesktopNavRow.jsx draws it as a desktop row (the phone
-// bar is not rendered from 1024px up). Two copies would drift.
+// The five destinations the app navigates by, in order, with the icons components/
+// BottomNav.jsx draws them with. One list for the bar and for anything that later wants to
+// render the same five a different way — two copies would drift.
 import { Map, Sparkles, Dumbbell, Store, User } from 'lucide-react';
 
 export const NAV_ITEMS = [
