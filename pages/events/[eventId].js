@@ -10,6 +10,7 @@ import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { ArrowLeft } from 'lucide-react';
 import { useHideBottomNav } from '../../hooks/useHideBottomNav';
+import { useIsDesktop } from '../../hooks/useIsDesktop';
 import { useLayout } from '../../context/LayoutContext';
 import EventProfileModal from '../../components/EventProfileModal';
 import TicketsList from '../../components/TicketsList';
@@ -22,6 +23,14 @@ const LEAF_30 = 'rgba(171,212,158,0.3)';
 
 // Entities arrive from different endpoints with different image field names.
 const imgOf = (o = {}) => o.image || o.avatar || o.photo || o.coverImage || null;
+
+// A section is a horizontal scroller on a phone (touch, one row) and a grid once there is
+// room for more than a card or two — on a laptop the scroller left most of the window
+// empty behind a scrollbar, which is what made the page read as a phone layout.
+function rowStyle(isDesktop, minCard) {
+  if (!isDesktop) return { display: 'flex', overflowX: 'auto', gap: 15, paddingBottom: 10 };
+  return { display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${minCard}px, 1fr))`, gap: 15, paddingBottom: 10 };
+}
 
 // Section header — 18px bold title, action or count on the right, 1px leaf rule beneath.
 function SectionHeader({ title, count, onViewAll }) {
@@ -68,6 +77,7 @@ export default function EventDetail() {
   const router = useRouter();
   const { eventId } = router.query;
   const { setActiveNav } = useLayout();
+  const isDesktop = useIsDesktop();
 
   const [event, setEvent] = useState(null);
   const [tickets, setTickets] = useState([]);
@@ -112,33 +122,34 @@ export default function EventDetail() {
   return (
     <>
       <Head><title>{event.title} — Lucid Jungles</title></Head>
-      <div style={{ minHeight: '100vh', backgroundColor: INK, color: LEAF, padding: '0 8px', paddingBottom: 70 }}>
-        {/* Header */}
-        <div style={{ height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', padding: '0 7px', marginTop: 10, marginBottom: 15, borderBottom: `1px solid ${LEAF}` }}>
-          <button onClick={() => router.back()} style={{ position: 'absolute', left: 7, background: 'none', border: 'none', color: LEAF, cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+      <div style={{ minHeight: '100vh', backgroundColor: INK, color: LEAF, paddingBottom: isDesktop ? 110 : 70 }}>
+        <div style={{ maxWidth: 1180, margin: '0 auto', padding: isDesktop ? '0 32px' : '0 8px' }}>
+        {/* Header — the title is the event's own, not the placeholder it used to render */}
+        <div style={{ height: isDesktop ? 72 : 30, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', padding: '0 7px', marginTop: isDesktop ? 0 : 10, marginBottom: 15, borderBottom: `1px solid ${LEAF}` }}>
+          <button onClick={() => router.back()} aria-label="Back" style={{ position: 'absolute', left: 7, background: 'none', border: 'none', color: LEAF, cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
             <ArrowLeft size={22} />
           </button>
-          <span style={{ fontWeight: 'bold', fontSize: 16 }}>Event Name</span>
+          <span style={{ maxWidth: '75%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 'bold', fontSize: isDesktop ? 18 : 16 }}>{event.title}</span>
         </div>
 
-        {/* Event description */}
-        <div style={{ margin: '0 7px', padding: '10px 0' }}>
-          <div style={{ minHeight: 457, border: `1px solid ${LEAF}`, overflow: 'hidden' }}>
-            <div style={{ height: 200, backgroundColor: LEAF_10, borderBottom: `1px solid ${LEAF}` }}>
+        {/* Event description — cover beside the copy once the window is wide enough */}
+        <div style={{ margin: isDesktop ? 0 : '0 7px', padding: '10px 0' }}>
+          <div style={{ minHeight: isDesktop ? 'auto' : 457, border: `1px solid ${LEAF}`, overflow: 'hidden', display: isDesktop ? 'grid' : 'block', gridTemplateColumns: isDesktop ? 'minmax(320px, 460px) 1fr' : undefined }}>
+            <div style={{ height: isDesktop ? '100%' : 200, minHeight: isDesktop ? 300 : undefined, backgroundColor: LEAF_10, borderBottom: isDesktop ? 'none' : `1px solid ${LEAF}`, borderRight: isDesktop ? `1px solid ${LEAF}` : 'none' }}>
               {event.coverImage && <img src={event.coverImage} alt={event.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
             </div>
-            <div style={{ padding: 15 }}>
-              <div style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 10 }}>{event.title}</div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 15, fontSize: 14 }}>
+            <div style={{ padding: isDesktop ? 28 : 15 }}>
+              <div style={{ fontSize: isDesktop ? 26 : 18, fontWeight: 'bold', marginBottom: 10 }}>{event.title}</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, marginBottom: 15, fontSize: 14, flexWrap: 'wrap' }}>
                 <span style={{ fontWeight: 'bold' }}>{event.location}</span>
                 <span style={{ opacity: 0.8 }}>{dateLabel}{event.time ? ` | ${event.time}` : ''}</span>
               </div>
               {event.description && (
                 <>
-                  <div style={{ fontSize: 14, lineHeight: 1.5, marginBottom: 10, opacity: 0.9, overflow: 'hidden', display: showFullDesc ? 'block' : '-webkit-box', WebkitLineClamp: showFullDesc ? 'unset' : 3, WebkitBoxOrient: 'vertical' }}>
+                  <div style={{ fontSize: 14, lineHeight: 1.6, marginBottom: 10, opacity: 0.9, overflow: 'hidden', display: showFullDesc ? 'block' : '-webkit-box', WebkitLineClamp: showFullDesc ? 'unset' : (isDesktop ? 'unset' : 3), WebkitBoxOrient: 'vertical' }}>
                     {event.description}
                   </div>
-                  {event.description.length > 200 && (
+                  {!isDesktop && event.description.length > 200 && (
                     <button onClick={() => setShowFullDesc(v => !v)} style={{ color: LEAF, fontSize: 14, opacity: 0.8, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
                       {showFullDesc ? 'SEE LESS' : 'SEE MORE'}
                     </button>
@@ -150,12 +161,12 @@ export default function EventDetail() {
         </div>
 
         {/* Who's Coming? */}
-        <div style={{ margin: '0 7px', padding: '10px 0' }}>
+        <div style={{ margin: isDesktop ? 0 : '0 7px', padding: '10px 0' }}>
           <SectionHeader title="Who's Coming?" count={attendees.length} onViewAll={attendees.length ? () => viewAll('ATTENDEES') : undefined} />
-          <div style={{ display: 'flex', overflowX: 'auto', gap: 15, paddingBottom: 10 }}>
-            {attendees.length === 0 && <EmptyCards width={180} imageHeight={160} label="No attendees yet" />}
+          <div style={rowStyle(isDesktop, 180)}>
+            {attendees.length === 0 && <EmptyCards width={isDesktop ? '100%' : 180} imageHeight={isDesktop ? 200 : 160} label="No attendees yet" />}
             {attendees.map(a => (
-              <EntityCard key={a._id || a.id} entity={a} width={180} imageHeight={160} onClick={() => setSelectedEntity({ ...a, type: 'ATTENDEE' })}>
+              <EntityCard key={a._id || a.id} entity={a} width={isDesktop ? '100%' : 180} imageHeight={isDesktop ? 200 : 160} onClick={() => setSelectedEntity({ ...a, type: 'ATTENDEE' })}>
                 <div style={{ fontSize: 13, fontWeight: 'bold' }}>{a.name}</div>
                 {a.role && <div style={{ fontSize: 11, opacity: 0.7 }}>{a.role}</div>}
               </EntityCard>
@@ -164,12 +175,12 @@ export default function EventDetail() {
         </div>
 
         {/* Featured Talent */}
-        <div style={{ margin: '0 7px', padding: '10px 0' }}>
+        <div style={{ margin: isDesktop ? 0 : '0 7px', padding: '10px 0' }}>
           <SectionHeader title="Featured Talent" count={talents.length} onViewAll={talents.length ? () => viewAll('TALENTS') : undefined} />
-          <div style={{ display: 'flex', overflowX: 'auto', gap: 15, paddingBottom: 10 }}>
-            {talents.length === 0 && <EmptyCards width={270} imageHeight={280} label="No talent announced yet" />}
+          <div style={rowStyle(isDesktop, 260)}>
+            {talents.length === 0 && <EmptyCards width={isDesktop ? '100%' : 270} imageHeight={280} label="No talent announced yet" />}
             {talents.map(t => (
-              <EntityCard key={t._id || t.id} entity={t} width={270} imageHeight={280} onClick={() => setSelectedEntity({ ...t, type: 'TALENT' })}>
+              <EntityCard key={t._id || t.id} entity={t} width={isDesktop ? '100%' : 270} imageHeight={280} onClick={() => setSelectedEntity({ ...t, type: 'TALENT' })}>
                 <div style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 5 }}>{t.name}</div>
                 <div style={{ fontSize: 13, opacity: 0.8 }}>{t.role}</div>
               </EntityCard>
@@ -178,13 +189,13 @@ export default function EventDetail() {
         </div>
 
         {/* Exhibitors — main image plus the donor's row of product thumbnails */}
-        <div style={{ margin: '0 7px', padding: '10px 0' }}>
+        <div style={{ margin: isDesktop ? 0 : '0 7px', padding: '10px 0' }}>
           <SectionHeader title="Exhibitors" count={exhibitors.length} onViewAll={exhibitors.length ? () => viewAll('EXHIBITORS') : undefined} />
-          <div style={{ display: 'flex', overflowX: 'auto', gap: 15, paddingBottom: 10 }}>
-            {exhibitors.length === 0 && <EmptyCards width={300} imageHeight={280} label="No exhibitors yet" />}
+          <div style={rowStyle(isDesktop, 300)}>
+            {exhibitors.length === 0 && <EmptyCards width={isDesktop ? '100%' : 300} imageHeight={isDesktop ? 240 : 280} label="No exhibitors yet" />}
             {exhibitors.map(ex => (
-              <div key={ex._id || ex.id} onClick={() => setSelectedEntity({ ...ex, type: 'EXHIBITOR' })} style={{ flexShrink: 0, width: 300, border: `1px solid ${LEAF}`, overflow: 'hidden', cursor: 'pointer' }}>
-                <div style={{ position: 'relative', height: 280, borderBottom: `1px solid ${LEAF}` }}>
+              <div key={ex._id || ex.id} onClick={() => setSelectedEntity({ ...ex, type: 'EXHIBITOR' })} style={{ flexShrink: 0, width: isDesktop ? '100%' : 300, border: `1px solid ${LEAF}`, overflow: 'hidden', cursor: 'pointer' }}>
+                <div style={{ position: 'relative', height: isDesktop ? 240 : 280, borderBottom: `1px solid ${LEAF}` }}>
                   <div style={{ width: '100%', height: '100%', backgroundColor: LEAF_10 }}>
                     {imgOf(ex) && <img src={imgOf(ex)} alt={ex.name || ''} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
                   </div>
@@ -206,24 +217,26 @@ export default function EventDetail() {
         </div>
 
         {/* Tickets */}
-        <div style={{ margin: '0 7px', padding: '10px 0' }}>
+        <div style={{ margin: isDesktop ? 0 : '0 7px', padding: '10px 0' }}>
           <SectionHeader title="Tickets" count={tickets.length} />
           <TicketsList tickets={tickets} onTicketClick={() => goTo(`/events/${eventId}/tickets`)} isEventOwner={isAdmin} userTicketCounts={{}} />
+        </div>
         </div>
 
         {selectedEntity && (
           <EventProfileModal entity={selectedEntity} onClose={() => setSelectedEntity(null)} eventName={event.title} />
         )}
 
-        {/* Fixed CTA — outlined for the organiser, filled for everyone else */}
+        {/* Fixed CTA — outlined for the organiser, filled for everyone else. Edge-to-edge on a
+            phone; on a desktop it stays a centred bar rather than a 1400px-wide strip. */}
         {isAdmin ? (
           <button onClick={() => { setActiveNav('YOU'); goTo(`/tkxts/myevents/${eventId}/dashboard`); }}
-            style={{ position: 'fixed', bottom: 15, left: 8, right: 8, height: 42, backgroundColor: 'transparent', color: LEAF, border: `1px solid ${LEAF}`, fontWeight: 'bold', fontSize: 16, cursor: 'pointer', zIndex: 10000 }}>
+            style={{ position: 'fixed', bottom: isDesktop ? 24 : 15, left: isDesktop ? '50%' : 8, right: isDesktop ? 'auto' : 8, transform: isDesktop ? 'translateX(-50%)' : undefined, width: isDesktop ? 'min(420px, 60vw)' : undefined, height: 46, backgroundColor: 'transparent', color: LEAF, border: `1px solid ${LEAF}`, fontWeight: 'bold', fontSize: 16, cursor: 'pointer', zIndex: 10000 }}>
             GO TO EVENT DASHBOARD
           </button>
         ) : (
           <button onClick={() => goTo(`/events/${eventId}/tickets`)}
-            style={{ position: 'fixed', bottom: 15, left: 8, right: 8, height: 42, backgroundColor: LEAF, color: INK, border: `1px solid ${LEAF}`, fontWeight: 'bold', fontSize: 16, cursor: 'pointer', zIndex: 10000 }}>
+            style={{ position: 'fixed', bottom: isDesktop ? 24 : 15, left: isDesktop ? '50%' : 8, right: isDesktop ? 'auto' : 8, transform: isDesktop ? 'translateX(-50%)' : undefined, width: isDesktop ? 'min(420px, 60vw)' : undefined, height: 46, backgroundColor: LEAF, color: INK, border: `1px solid ${LEAF}`, fontWeight: 'bold', fontSize: 16, cursor: 'pointer', zIndex: 10000 }}>
             PURCHASE TICKETS
           </button>
         )}
