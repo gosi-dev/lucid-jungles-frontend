@@ -24,6 +24,7 @@ rather than an impression. Screenshots are written alongside the numbers.
     npm run verify:shell        # the shell ten routes share, /chat end to end, storage
     npm run verify:profile      # the profile a VIEW PROFILE action opens
     npm run verify:base         # a base: the face, the visit counts, the knock, the plan
+    npm run verify:store        # the store: the shelf ceiling, the cart, the stuck stepper
 
 On Node 20 the flag is required, so run the files directly:
 
@@ -114,6 +115,47 @@ an `<img>` that can be picked up — a native image drag swallows every later
 turned out to be.
 
 
+
+`verify-store.js` — the shelf, which is the one number in the store that used to be a lie. The
+backend read `instock` and ignored `quantity`, so a tee with 0 on the shelf still offered ADD TO
+CART and the cart's stepper could be walked past a shelf that would refuse the next write. The
+probe pins the claim in three places, against the real tee and a real 3-then-0 shelf:
+
+- **the server is the authority** — over `POST /api/store/add_to_cart` and `PUT
+  /api/store/edit_cart/:cartId`, the third add of a shelf of 3 is a 400 that *counts* (`Only 3 of
+  "LCJ Tee" are left and 3 are already in your cart`), a single add of 3 into an empty cart is
+  refused as well, `4` of `3` by stepper is refused (`Only 3 are left of "LCJ Tee"`) while `3`
+  and `2` are allowed, and with `quantity: 0` and `instock: true` **both** write paths refuse
+  (`There is none of "LCJ Tee" left` / `out of stock`) with the cart untouched;
+- **a refusal leaves nothing behind** — a shopper whose first tap is refused gets no empty cart
+  as a souvenir: `carts` for that user is 0, `user.cart` is unset, and reading the cart is still
+  an empty `200` rather than a 404;
+- **the UI already knows** — on the product page `ONLY 3 LEFT`, in the cart the stepper reaches
+  `3` and then stops with `MAX — ONLY 3 LEFT`, a disabled `+` whose `aria-label` is `Only 3 left
+  in stock` and whose cursor is `not-allowed`, and a click on that disabled control changes
+  nothing (the write it would have made is the 400 above); stepping back down returns `ONLY 3
+  LEFT` and a live `+`; with the shelf at 0 the catalogue card is a dimmed `SOLD OUT` while the
+  other two products still offer ADD TO CART, and the product page reads `OUT OF STOCK` over a
+  disabled `SOLD OUT`.
+
+The ceiling is also shown to be *per product*: a second line (`JUNGLE KIT — DIGITAL`, 5) still
+adds freely beside a capped tee, so a global cap could not pass this. Three traps are worth
+keeping from building it. The refusal check has to read the cart back from the **server**, not
+from the probe's own bookkeeping — the bug it catches is a line written before validation, which
+the probe's own bookkeeping would call clean. The stepper must be *waited* for rather than slept
+on: the cart page writes and refetches, so a transition shows `cursor: wait`, and a qty sampled
+during it reports the previous value — an early failure of "the + comes back" was exactly that,
+a sample taken mid-write, which is why `waitForStepper` prints a timeline instead of a verdict.
+And the browser half signs in through the form, so it fails loudly if that did not take: a first
+run of this file "found" an empty cart and no cards because the account helper never carried the
+password, the form was filled with the literal string `undefined`, and the tab was signed in as
+nobody — a dozen failures far from the one line that caused them. The sign-in now waits for the
+page to leave `/signin` (re-offering the click) and every tap is checked against the server's
+cart, because a swallowed click must not pass as a shelf that refused it.
+
+The tee's shelf is restored in a `finally` (and asserted back), and both probe accounts and their
+carts are deleted, so a run leaves the store as it found it. The API half needs no Chrome; the
+browser half needs the two servers and the CDP port like the rest of the suite.
 
 ## Notes
 
